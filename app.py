@@ -9,16 +9,12 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.llms import Ollama
 from langchain.prompts import PromptTemplate
 
-# ====================== CONFIG LOGGING ======================
+# ====================== CONFIG LOGGING (7.2.5) ======================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ====================== PAGE CONFIG ======================
-st.set_page_config(
-    page_title="SmartDoc AI",
-    page_icon="🤖",
-    layout="wide"
-)
+st.set_page_config(page_title="SmartDoc AI", page_icon="🤖", layout="wide")
 
 # ====================== SIDEBAR ======================
 with st.sidebar:
@@ -38,7 +34,7 @@ with st.sidebar:
     # 7.2.3 Thay đổi LLM model
     llm_model = st.selectbox(
         "Mô hình LLM",
-        ["qwen2.5:7b", "llama3:8b", "mistral:7b", "gemma:7b"],
+        ["qwen2.5:7b", "llama2:7b", "mistral:7b"],
         index=0
     )
     
@@ -46,7 +42,7 @@ with st.sidebar:
     st.markdown("""
     ### Hướng dẫn sử dụng:
     1. Tải lên file PDF  
-    2. Điều chỉnh tham số (nếu cần)  
+    2. Điều chỉnh tham số (chunk sẽ tự cắt lại khi thay đổi)  
     3. Đặt câu hỏi
     """)
     st.caption("Bài tập lớn OSSD 2026 - SmartDoc AI")
@@ -59,40 +55,56 @@ st.markdown("Hệ thống tra cứu tài liệu thông minh sử dụng **RAG**.
 st.subheader("1. Tải lên tài liệu")
 uploaded_file = st.file_uploader("Chọn một tệp PDF", type=['pdf'])
 
+# ====================== XỬ LÝ TÀI LIỆU ======================
 if uploaded_file is not None:
-    if "vector_store" not in st.session_state or st.session_state.get("current_file") != uploaded_file.name:
-        with st.spinner("Đang xử lý tài liệu..."):
+    # Kiểm tra xem có cần re-process không (chunk thay đổi hoặc chưa có vector store)
+    need_reprocess = (
+        "vector_store" not in st.session_state or
+        st.session_state.get("current_file") != uploaded_file.name or
+        st.session_state.get("last_chunk_size") != chunk_size or
+        st.session_state.get("last_chunk_overlap") != chunk_overlap
+    )
+
+    if need_reprocess:
+        with st.spinner("Đang xử lý / cắt lại tài liệu với tham số mới..."):
             try:
+                # Lưu file tạm để đọc
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                     tmp_file.write(uploaded_file.getvalue())
                     tmp_path = tmp_file.name
 
-                logger.info(f"Processing file: {uploaded_file.name}")
+                logger.info(f"Processing file: {uploaded_file.name} | Chunk: {chunk_size}/{chunk_overlap}")
 
+                # Load PDF (chỉ load 1 lần)
                 loader = PDFPlumberLoader(tmp_path)
-                docs = loader.load()
-                logger.info(f"Loaded {len(docs)} pages")
+                raw_docs = loader.load()
 
+                # Split với tham số mới
                 text_splitter = RecursiveCharacterTextSplitter(
                     chunk_size=chunk_size,
                     chunk_overlap=chunk_overlap
                 )
-                documents = text_splitter.split_documents(docs)
-                logger.info(f"Split into {len(documents)} chunks")
+                documents = text_splitter.split_documents(raw_docs)
 
+                # Embedding
                 embedder = HuggingFaceEmbeddings(
                     model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
                     model_kwargs={'device': 'cpu'},
                     encode_kwargs={'normalize_embeddings': True}
                 )
 
+                # Tạo vector store mới
                 vector_store = FAISS.from_documents(documents, embedder)
-                
+
+                # Lưu vào session_state
                 st.session_state['vector_store'] = vector_store
+                st.session_state['raw_docs'] = raw_docs          # lưu để tái sử dụng
                 st.session_state['current_file'] = uploaded_file.name
-                
+                st.session_state['last_chunk_size'] = chunk_size
+                st.session_state['last_chunk_overlap'] = chunk_overlap
+
+                logger.info(f" Processing {len(documents)} chunks ")
                 st.success(f"✅ Tài liệu đã sẵn sàng!")
-                logger.info("Vector store created successfully")
 
             finally:
                 if os.path.exists(tmp_path):
@@ -112,28 +124,36 @@ if user_question:
     elif "vector_store" not in st.session_state:
         st.warning("Vui lòng đợi tài liệu được xử lý xong!")
     else:
+        logger.info(f"Query: {user_question}")
+
         with st.spinner("Đang sinh câu trả lời..."):
             try:
                 vector_store = st.session_state['vector_store']
                 
+                # Retriever
+                kwargs = {"k": k_value}
+                if search_type == "mmr":
+                    kwargs["fetch_k"] = k_value * 4
+                    kwargs["lambda_mult"] = 0.7
+
                 retriever = vector_store.as_retriever(
                     search_type=search_type,
-                    search_kwargs={"k": k_value}
+                    search_kwargs=kwargs
                 )
                 
                 relevant_docs = retriever.invoke(user_question)
-                logger.info(f"Retrieved {len(relevant_docs)} documents for query")
+                logger.info(f"Retrieved {len(relevant_docs)} documents")
 
                 context = "\n\n".join([doc.page_content for doc in relevant_docs])
 
-                # Prompt Engineering
+                # Prompt
                 vietnamese_chars = 'áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ'
                 is_vietnamese = any(char in user_question.lower() for char in vietnamese_chars)
 
                 if is_vietnamese:
-                    prompt_template = """Sử dụng ngữ cảnh sau đây để trả lời câu hỏi một cách đầy đủ, chi tiết và chính xác nhất có thể.
-                        Hãy tổng hợp thông tin từ các đoạn ngữ cảnh, trình bày rõ ràng (sử dụng gạch đầu dòng nếu cần).
-                        Nếu thông tin không có trong ngữ cảnh, hãy trả lời: "Dựa vào tài liệu cung cấp, tôi không có thông tin về vấn đề này."
+                    prompt_template = """Sử dụng ngữ cảnh sau đây để trả lời đầy đủ và chính xác.
+                        Hãy tổng hợp thông tin, dùng gạch đầu dòng nếu cần.
+                        Nếu không có thông tin, hãy nói rõ.
 
                         Ngữ cảnh: {context}
 
@@ -141,9 +161,9 @@ if user_question:
 
                         Trả lời:"""
                 else:
-                    prompt_template = """Use the following context to provide a comprehensive, detailed and accurate answer.
-                        Synthesize information from the context and use bullet points when appropriate.
-                        If the answer is not in the context, say: "Based on the provided document, I do not have information on this topic."
+                    prompt_template = """Use the following context to provide a comprehensive answer.
+                        Synthesize information and use bullet points when appropriate.
+                        If not in the context, clearly state so.
 
                         Context: {context}
 
@@ -153,9 +173,8 @@ if user_question:
 
                 prompt = PromptTemplate(template=prompt_template, input_variables=["context", "user_input"])
 
-                # 7.2.3 LLM Configuration - sử dụng model được chọn
                 llm = Ollama(
-                    model=llm_model,      # ← Đã hỗ trợ thay đổi
+                    model=llm_model,
                     temperature=0.3,
                     top_p=0.9,
                     repeat_penalty=1.1
@@ -173,7 +192,7 @@ if user_question:
                         st.caption(doc.page_content)
 
             except Exception as e:
-                st.error("❌ Lỗi khi gọi LLM. Kiểm tra Ollama đang chạy và model đã được pull.")
+                st.error("❌ Lỗi khi gọi LLM. Kiểm tra Ollama đang chạy.")
                 st.error(f"Lỗi: {str(e)}")
                 logger.error(f"Error: {e}")
 
