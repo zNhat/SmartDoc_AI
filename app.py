@@ -3,111 +3,100 @@ import os
 import tempfile
 import uuid
 
-# Import UI
+from src.utils.storage import save_sessions_to_disk, load_sessions_from_disk
 from src.ui.sidebar import render_sidebar
 from src.ui.chat_area import render_chat_history
-
-# Import Core RAG Logic
 from src.document.loader import process_pdf
-from src.retriever.faiss_store import create_vector_store, get_retriever
+from src.retriever.faiss_store import create_vector_store, save_vector_store, load_vector_store, get_retriever
 from src.llm.generator import generate_answer
 
-# ====================== KHỞI TẠO STATE (MULTI-SESSION) ======================
+# ====================== KHỞI TẠO ======================
 st.set_page_config(page_title="SmartDoc AI", page_icon="🤖", layout="wide")
 
-# Khởi tạo từ điển chứa tất cả các phiên với cấu trúc lưu trữ tài liệu riêng biệt
 if "all_sessions" not in st.session_state:
-    new_id = str(uuid.uuid4())
-    st.session_state.all_sessions = {
-        new_id: {
-            "title": "Cuộc trò chuyện mới", 
-            "messages": [],
-            "vector_store": None,  # Lưu FAISS Vector Store riêng cho phiên này
-            "file_name": None      # Lưu tên file riêng cho phiên này
+    saved_data = load_sessions_from_disk()
+    if saved_data:
+        st.session_state.all_sessions = saved_data
+        st.session_state.current_session_id = list(saved_data.keys())[0]
+    else:
+        new_id = str(uuid.uuid4())
+        st.session_state.all_sessions = {
+            new_id: {"title": "Cuộc trò chuyện mới", "messages": [], "vector_store": None, "file_name": None}
         }
-    }
-    st.session_state.current_session_id = new_id
+        st.session_state.current_session_id = new_id
 
-# Lấy ID và dữ liệu của phiên hiện tại
 curr_id = st.session_state.current_session_id
 curr_session = st.session_state.all_sessions[curr_id]
 
-# ====================== SIDEBAR ======================
-# Hàm render_sidebar trả về các tham số config (chunk_size, k_value, etc.)
+# Nạp Vector Store từ ổ cứng
+if curr_session["vector_store"] is None and curr_session["file_name"] is not None:
+    loaded_vs = load_vector_store(curr_id)
+    if loaded_vs:
+        st.session_state.all_sessions[curr_id]["vector_store"] = loaded_vs
+
+# ====================== 1. SIDEBAR ======================
 config_params = render_sidebar()
 
-# ====================== MAIN AREA ======================
+# ====================== 2. QUẢN LÝ TÀI LIỆU ======================
 st.title("📄 SmartDoc AI")
 
-# Kiểm tra xem phiên hiện tại đã có tài liệu chưa để mở/đóng expander       
-has_doc = curr_session["vector_store"] is not None
+has_doc = curr_session["file_name"] is not None
 
+# Khung Expander đóng/mở tự động tùy theo việc đã có file hay chưa
 with st.expander("📁 Quản lý Tài liệu", expanded=not has_doc):
     uploaded_file = st.file_uploader(f"Tải lên PDF cho phiên: {curr_session['title']}", type=['pdf'])
     
     if uploaded_file is not None:
-        # Chỉ xử lý nếu file mới khác với file đã lưu trong phiên này
         if curr_session["file_name"] != uploaded_file.name:
-            with st.spinner("Đang xử lý tài liệu cho riêng phiên chat này..."):
+            with st.spinner("Đang xử lý tài liệu..."):
                 try:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                         tmp_file.write(uploaded_file.getvalue())
                         tmp_path = tmp_file.name
 
-                    # Thực hiện Document Processing Flow
                     documents = process_pdf(tmp_path, config_params["chunk_size"], config_params["chunk_overlap"])
                     vector_store = create_vector_store(documents)
+                    save_vector_store(vector_store, curr_id)
 
-                    # Lưu trực tiếp vào ngăn chứa của phiên hiện tại
                     st.session_state.all_sessions[curr_id]['vector_store'] = vector_store
                     st.session_state.all_sessions[curr_id]['file_name'] = uploaded_file.name
+                    save_sessions_to_disk(st.session_state.all_sessions)
                     
-                    st.success(f"✅ Tài liệu '{uploaded_file.name}' đã sẵn sàng cho phiên này!")
+                    st.success(f"✅ Tài liệu '{uploaded_file.name}' đã sẵn sàng!")
                     st.rerun()
-
+                except Exception as e:
+                    st.error(f"❌ Lỗi: {str(e)}")
                 finally:
-                    if os.path.exists(tmp_path):
+                    if 'tmp_path' in locals() and os.path.exists(tmp_path):
                         os.remove(tmp_path)
     
-    # Hiển thị trạng thái tài liệu của phiên hiện tại
+    # Hiển thị trạng thái file
     if curr_session["file_name"]:
-        st.info(f"📄 Phiên này đang sử dụng tài liệu: **{curr_session['file_name']}**")
+        st.info(f"📄 Tài liệu đang liên kết: **{curr_session['file_name']}**")
 
 st.divider()
 
-# ====================== KHU VỰC CHAT ======================
-# Truyền danh sách tin nhắn của phiên hiện hành vào hàm hiển thị
+# ====================== 3. KHU VỰC CHAT ======================
 render_chat_history(curr_session["messages"])
 
-if prompt_text := st.chat_input("Nhập câu hỏi của bạn vào đây..."):
-    # Kiểm tra vector store trong phiên hiện tại
+if prompt_text := st.chat_input("Nhập câu hỏi..."):
     if curr_session["vector_store"] is None:
-        st.error("Vui lòng tải lên tài liệu PDF cho phiên chat này trước!")
+        st.error("Vui lòng tải lên tài liệu PDF trước!")
     else:
-        # Cập nhật tiêu đề phiên nếu đây là câu hỏi đầu tiên
         if len(curr_session["messages"]) == 0:
-            short_title = prompt_text[:30] + ("..." if len(prompt_text) > 30 else "")
-            st.session_state.all_sessions[curr_id]["title"] = short_title
+            st.session_state.all_sessions[curr_id]["title"] = prompt_text[:25] + "..."
 
-        # Lưu câu hỏi vào phiên hiện tại
         st.session_state.all_sessions[curr_id]["messages"].append({"role": "user", "content": prompt_text})
+        save_sessions_to_disk(st.session_state.all_sessions)
             
         with st.chat_message("user"):
             st.markdown(prompt_text)
 
-        # XỬ LÝ AI RAG (Query Processing Flow)
         with st.chat_message("assistant"):
-            with st.spinner("Đang tra cứu tài liệu và suy nghĩ..."):
+            with st.spinner("Đang tra cứu và suy nghĩ..."):
                 try:
-                    # Truy xuất từ Vector Store riêng của phiên này
-                    retriever = get_retriever(
-                        curr_session['vector_store'], 
-                        config_params["search_type"], 
-                        config_params["k_value"]
-                    )
+                    retriever = get_retriever(curr_session['vector_store'], config_params["search_type"], config_params["k_value"])
                     relevant_docs = retriever.invoke(prompt_text)
-                    
-                    # Sinh câu trả lời qua mô hình LLM (Ollama)
                     answer = generate_answer(prompt_text, relevant_docs, config_params["llm_model"])
                     
                     st.markdown(answer)
@@ -115,19 +104,15 @@ if prompt_text := st.chat_input("Nhập câu hỏi của bạn vào đây..."):
                     source_texts = [doc.page_content for doc in relevant_docs]
                     with st.expander("📑 Xem nguồn tham khảo"):
                         for i, doc_text in enumerate(source_texts, 1):
-                            # Đảm bảo nội dung citation được ghi nhận đúng
-                            st.markdown(f"**Đoạn {i} (chỗ này ghi lại nói là đọc từ tài liệu):**")
+                            st.markdown(f"**Đoạn {i} (đọc từ tài liệu):**")
                             st.caption(doc_text)
 
-                    # Lưu câu trả lời vào phiên hiện tại
                     st.session_state.all_sessions[curr_id]["messages"].append({
-                        "role": "assistant", 
-                        "content": answer,
-                        "sources": source_texts
+                        "role": "assistant", "content": answer, "sources": source_texts
                     })
                     
+                    save_sessions_to_disk(st.session_state.all_sessions)
                     st.rerun()
-
                 except Exception as e:
-                    st.error("❌ Lỗi xử lý AI. Hãy kiểm tra lại kết nối Ollama.")
-                    st.error(f"Chi tiết: {str(e)}")
+                    st.error("❌ Lỗi AI.")
+                    st.exception(e)
