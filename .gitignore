@@ -1,4 +1,16 @@
+# Environments
 venv/
-__pycache__/
-*.pdf
 .env
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# Data & Database
+*.pdf
+*.docx
+vector_store/
+
+# OS generated files
+.DS_Store
+Thumbs.db

@@ -1,6 +1,6 @@
 # SmartDoc AI - Local RAG System
 
-**Yêu cầu:** Máy tính đã cài đặt sẵn Python 3.8+ và [Ollama](https://ollama.com/).
+**Yêu cầu:** Máy tính đã cài đặt sẵn Python 3.12.9+ và [Ollama](https://ollama.com/).
 
 ## 🚀 Cài đặt & Khởi chạy nhanh
 
