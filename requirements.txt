@@ -9,3 +9,4 @@ torch
 numpy
 pandas
 docx2txt
+rank_bm25
