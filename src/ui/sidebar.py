@@ -102,7 +102,7 @@ def render_sidebar():
             k_value = st.slider("Số đoạn (k)", 3, 8, 5)
             llm_model = st.selectbox(
                 "Mô hình LLM",
-                ["llama3.2:1b", "qwen2.5:0.5b", "qwen2.5:1.5b", "qwen2.5:3b","qwen2.5:7b", "llama2:7b"],
+                ["qwen2.5:7b", "llama3.2:1b", "qwen2.5:0.5b", "qwen2.5:1.5b", "qwen2.5:3b", "llama2:7b"],
                 index=0,
             )
 
