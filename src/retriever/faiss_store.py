@@ -43,11 +43,20 @@ def load_vector_store(session_id):
         )
     return None
 
-def get_retriever(vector_store, search_type: str, k_value: int):
+def get_retriever(vector_store, search_type: str, k_value: int, filter_dict: dict = None):
     """Cấu hình bộ truy xuất dữ liệu"""
     kwargs = {"k": k_value}
+
+    if filter_dict:                         # bộ lọc metadata 
+        kwargs["filter"] = filter_dict
+
     if search_type == "mmr":
         kwargs["fetch_k"] = k_value * 4
         kwargs["lambda_mult"] = 0.7
         
     return vector_store.as_retriever(search_type=search_type, search_kwargs=kwargs)
+
+def update_vector_store(existing_store, new_documents):
+    """Thêm tài liệu mới vào Vector Store hiện có"""
+    existing_store.add_documents(new_documents)
+    return existing_store
