@@ -8,3 +8,4 @@ pdfplumber
 torch
 numpy
 pandas
+docx2txt

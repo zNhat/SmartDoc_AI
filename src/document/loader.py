@@ -3,7 +3,7 @@ import os
 
 from langchain_community.document_loaders import PDFPlumberLoader
 from langchain.schema import Document
-from docx import Document as DocxDocument
+import docx2txt   # ✅ thay thế python-docx
 
 from src.document.splitter import split_documents
 
@@ -20,15 +20,19 @@ def process_document(file_path: str, chunk_size: int, chunk_overlap: int):
         raw_docs = loader.load()
 
     elif ext == ".docx":
-        doc = DocxDocument(file_path)
-        full_text = "\n".join([para.text for para in doc.paragraphs])
+        # ✅ dùng docx2txt thay vì python-docx
+        full_text = docx2txt.process(file_path)
+
+        # xử lý trường hợp file rỗng
+        if not full_text or full_text.strip() == "":
+            raise ValueError("File DOCX không có nội dung!")
+
         raw_docs = [Document(page_content=full_text)]
 
     else:
         raise ValueError("Chỉ hỗ trợ PDF và DOCX")
 
-    # ====================== SPLIT (gọi từ splitter.py) ======================
+    # ====================== SPLIT ======================
     documents = split_documents(raw_docs, chunk_size, chunk_overlap)
 
-    # Không dùng logger theo yêu cầu đề
     return documents, len(documents)
