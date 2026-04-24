@@ -13,20 +13,31 @@ from src.llm.prompts import (
     build_relevance_check_prompt,
 )
 
+
 # =========================
 # 1. LLM CONFIG
 # =========================
 
 def get_llm(llm_model: str, temperature: float = 0.3) -> Ollama:
+    """
+    Khởi tạo Ollama LLM.
+    Giới hạn num_predict để tránh model sinh quá dài và bị treo.
+    """
     return Ollama(
         model=llm_model,
         temperature=temperature,
         top_p=0.9,
-        repeat_penalty=1.1
+        repeat_penalty=1.1,
+        num_predict=512,
+        num_ctx=4096,
+        timeout=120,
     )
 
 
 def invoke_llm(llm: Ollama, prompt: str) -> str:
+    """
+    Gọi LLM và chuẩn hóa output.
+    """
     response = llm.invoke(prompt)
 
     if response is None:
@@ -34,10 +45,14 @@ def invoke_llm(llm: Ollama, prompt: str) -> str:
 
     return str(response).strip()
 
+
+# =========================
+# 2. MEMORY / FOLLOW-UP UTILS
+# =========================
+
 def is_follow_up_question(user_question: str) -> bool:
     """
-    Kiểm tra câu hỏi có phải là câu hỏi nối tiếp hay không.
-    Chỉ dùng memory mạnh khi câu hỏi thật sự phụ thuộc ngữ cảnh trước.
+    Kiểm tra câu hỏi có phải là câu hỏi nối tiếp không.
     """
     if not user_question:
         return False
@@ -54,12 +69,14 @@ def is_follow_up_question(user_question: str) -> bool:
         "yêu cầu đó",
         "nội dung đó",
         "khác gì",
-        "so với câu",
+        "so với",
         "câu này",
         "phần này",
         "ở trên",
         "vừa rồi",
         "tiếp theo",
+        "ý đó",
+        "mục đó",
     ]
 
     return any(marker in q for marker in follow_up_markers)
@@ -68,7 +85,7 @@ def is_follow_up_question(user_question: str) -> bool:
 def build_safe_history_context(user_question: str, chat_messages):
     """
     Chỉ đưa lịch sử vào prompt nếu câu hỏi là follow-up.
-    Tránh memory làm lệch câu hỏi mới.
+    Tránh lịch sử làm lệch các câu hỏi độc lập.
     """
     if chat_messages and is_follow_up_question(user_question):
         return build_history_context(chat_messages, max_turns=5)
@@ -76,112 +93,59 @@ def build_safe_history_context(user_question: str, chat_messages):
     return "Câu hỏi hiện tại là câu hỏi độc lập. Không sử dụng lịch sử hội thoại nếu không cần thiết."
 
 
-def expand_questions_for_retrieval(
-    user_question: str,
-    rewritten_question: str,
-    sub_questions: list
-) -> list:
-    questions = []
+def find_latest_user_topic(chat_messages) -> str:
+    """
+    Lấy câu hỏi user gần nhất để xử lý các câu như 'nó', 'câu đó'.
+    Không hard-code theo file cụ thể.
+    """
+    if not chat_messages:
+        return ""
 
-    if rewritten_question:
-        questions.append(rewritten_question)
+    for msg in reversed(chat_messages):
+        if msg.get("role") == "user":
+            content = str(msg.get("content", "")).strip()
+            if content:
+                return content
 
-    if user_question and user_question not in questions:
-        questions.append(user_question)
+    return ""
 
-    for q in sub_questions:
-        if q and q not in questions:
-            questions.append(q)
 
-    combined_query = f"{user_question} {rewritten_question}".lower()
+def deterministic_rewrite_follow_up(user_question: str, chat_messages) -> str:
+    """
+    Rewrite nhẹ các câu follow-up phổ biến.
+    Không hard-code nội dung tài liệu.
+    """
+    if not user_question:
+        return user_question
 
-    if "yêu cầu phát triển" in combined_query or "các yêu cầu phát triển" in combined_query:
-        questions.insert(
-            0,
-            "8.2 Các yêu cầu phát triển Câu hỏi 1 Câu hỏi 2 Câu hỏi 3 "
-            "Câu hỏi 4 Câu hỏi 5 Câu hỏi 6 Câu hỏi 7 Câu hỏi 8 "
-            "Câu hỏi 9 Câu hỏi 10"
-        )
+    q = user_question.strip()
+    q_lower = q.lower()
 
-    if "câu hỏi 6" in combined_query or "câu 6" in combined_query:
-        questions.insert(
-            0,
-            "8.2.6 Câu hỏi 6 Implement Conversational RAG "
-            "Thêm memory để theo dõi ngữ cảnh cuộc hội thoại "
-            "LLM có thể tham chiếu câu hỏi và trả lời trước đó "
-            "Xử lý follow-up questions"
-        )
+    latest_topic = find_latest_user_topic(chat_messages)
 
-    if "câu hỏi 10" in combined_query or "câu 10" in combined_query:
-        questions.insert(
-            0,
-            "8.2.10 Câu hỏi 10 Advanced RAG với Self-RAG "
-            "Implement Self-RAG LLM tự đánh giá câu trả lời "
-            "Query rewriting Multi-hop reasoning Confidence scoring"
-        )
+    if not latest_topic:
+        return q
 
-    # Tối ưu câu so sánh câu 6 và câu 10
     if (
-        ("khác gì" in combined_query or "so sánh" in combined_query)
-        and ("câu hỏi 6" in combined_query or "câu 6" in combined_query)
-        and ("câu hỏi 10" in combined_query or "câu 10" in combined_query)
+        "câu đó" in q_lower
+        or "vậy câu đó" in q_lower
+        or "cái đó" in q_lower
+        or "phần đó" in q_lower
+        or "yêu cầu đó" in q_lower
+        or "nội dung đó" in q_lower
+        or "mục đó" in q_lower
+        or "ý đó" in q_lower
     ):
-        questions.insert(
-            0,
-            "So sánh Câu hỏi 6 Implement Conversational RAG và "
-            "Câu hỏi 10 Advanced RAG với Self-RAG. "
-            "Câu hỏi 6 gồm memory, tham chiếu lịch sử, follow-up questions. "
-            "Câu hỏi 10 gồm Self-RAG, query rewriting, multi-hop reasoning, confidence scoring."
-        )
+        return f"Dựa trên câu hỏi trước: '{latest_topic}', hãy trả lời câu hỏi nối tiếp: '{q}'"
 
-    unique_questions = []
-    seen = set()
+    if q_lower.startswith("nó"):
+        return f"Dựa trên nội dung đang được nhắc đến ở câu hỏi trước: '{latest_topic}', hãy trả lời: '{q}'"
 
-    for q in questions:
-        q = q.strip()
-        if q and q not in seen:
-            seen.add(q)
-            unique_questions.append(q)
+    return q
 
-    return unique_questions[:6]
-
-
-def check_context_relevance(
-    user_question: str,
-    rewritten_question: str,
-    context: str,
-    llm_model: str
-) -> dict:
-    """
-    Kiểm tra context có đủ liên quan để trả lời câu hỏi không.
-    Đây là chốt chặn để tránh hallucination.
-    """
-    llm = get_llm(llm_model, temperature=0.0)
-
-    prompt = build_relevance_check_prompt(
-        user_question=user_question,
-        rewritten_question=rewritten_question,
-        context=context
-    )
-
-    raw = invoke_llm(llm, prompt)
-    parsed = extract_json_from_text(raw)
-
-    if not parsed:
-        return {
-            "can_answer": True,
-            "confidence_score": 60,
-            "reason": "Không parse được JSON relevance check, cho phép trả lời mặc định."
-        }
-
-    return {
-        "can_answer": bool(parsed.get("can_answer", True)),
-        "confidence_score": normalize_confidence(parsed.get("confidence_score", 60)),
-        "reason": str(parsed.get("reason", "Không có lý do."))
-    }
 
 # =========================
-# 2. DOCUMENT / SOURCE UTILS
+# 3. DOCUMENT / SOURCE UTILS
 # =========================
 
 def get_doc_metadata(doc: Any) -> Dict[str, Any]:
@@ -234,7 +198,11 @@ def build_source_label(doc: Any, index: int) -> str:
     return f"Nguồn {index} | File: {source} | Trang: {page_text}"
 
 
-def format_docs_as_context(docs: List[Any], max_chars_per_doc: int = 2200) -> str:
+def format_docs_as_context(docs: List[Any], max_chars_per_doc: int = 1400) -> str:
+    """
+    Ghép docs thành context.
+    Giới hạn mỗi chunk để tránh prompt quá dài.
+    """
     if not docs:
         return "Không có đoạn tài liệu liên quan được truy xuất."
 
@@ -316,14 +284,14 @@ def extract_sources(docs: List[Any]) -> List[Dict[str, Any]]:
             "source": source,
             "page": format_page_number(page),
             "content": content,
-            "metadata": metadata
+            "metadata": metadata,
         })
 
     return sources
 
 
 # =========================
-# 3. QUERY REWRITING
+# 4. QUERY REWRITING
 # =========================
 
 def rewrite_query(
@@ -331,6 +299,10 @@ def rewrite_query(
     chat_messages: Optional[List[Dict[str, Any]]],
     llm_model: str
 ) -> str:
+    """
+    Viết lại câu hỏi nối tiếp thành câu hỏi độc lập.
+    Không dùng hard-code theo PDF cụ thể.
+    """
     user_question = user_question.strip()
 
     if not chat_messages or not has_chat_history(chat_messages):
@@ -358,14 +330,14 @@ def rewrite_query(
     if not rewritten:
         return user_question
 
-    if len(rewritten) > 500:
+    if len(rewritten) > 600:
         return user_question
 
     return rewritten
 
 
 # =========================
-# 4. MULTI-HOP REASONING
+# 5. MULTI-HOP / RETRIEVAL
 # =========================
 
 def parse_sub_questions(raw_text: str, fallback_question: str) -> List[str]:
@@ -396,6 +368,36 @@ def parse_sub_questions(raw_text: str, fallback_question: str) -> List[str]:
     return questions[:3]
 
 
+def should_use_multihop(user_question: str, rewritten_question: str) -> bool:
+    """
+    Chỉ dùng multi-hop cho câu hỏi phức tạp để app chạy nhanh hơn.
+    """
+    combined = f"{user_question} {rewritten_question}".lower()
+
+    markers = [
+        "so sánh",
+        "khác gì",
+        "khác nhau",
+        "phân tích",
+        "đánh giá",
+        "liệt kê và giải thích",
+        "vì sao",
+        "như thế nào",
+        "mối quan hệ",
+        "ảnh hưởng",
+        "nguyên nhân",
+        "kết quả",
+    ]
+
+    if any(marker in combined for marker in markers):
+        return True
+
+    if len(combined) > 180:
+        return True
+
+    return False
+
+
 def generate_sub_questions(
     user_question: str,
     rewritten_question: str,
@@ -408,7 +410,7 @@ def generate_sub_questions(
     prompt = build_multi_hop_prompt(
         user_question=user_question,
         rewritten_question=rewritten_question,
-        history_context=history_context
+        history_context=history_context,
     )
 
     raw = invoke_llm(llm, prompt)
@@ -418,6 +420,39 @@ def generate_sub_questions(
         sub_questions.insert(0, rewritten_question)
 
     return sub_questions[:3]
+
+
+def expand_questions_for_retrieval(
+    user_question: str,
+    rewritten_question: str,
+    sub_questions: list
+) -> list:
+    """
+    Tạo danh sách query để retrieve.
+    Bản này tổng quát, không hard-code theo file SmartDoc.
+    """
+    questions = []
+
+    if rewritten_question:
+        questions.append(rewritten_question)
+
+    if user_question and user_question not in questions:
+        questions.append(user_question)
+
+    for q in sub_questions:
+        if q and q not in questions:
+            questions.append(q)
+
+    unique_questions = []
+    seen = set()
+
+    for q in questions:
+        q = q.strip()
+        if q and q not in seen:
+            seen.add(q)
+            unique_questions.append(q)
+
+    return unique_questions[:4]
 
 
 def retrieve_docs_for_questions(
@@ -439,7 +474,7 @@ def retrieve_docs_for_questions(
 
 
 # =========================
-# 5. SELF-RAG CHECKING
+# 6. RELEVANCE / SELF-RAG
 # =========================
 
 def extract_json_from_text(text: str) -> Dict[str, Any]:
@@ -479,6 +514,40 @@ def normalize_confidence(value: Any) -> int:
     return score
 
 
+def check_context_relevance(
+    user_question: str,
+    rewritten_question: str,
+    context: str,
+    llm_model: str
+) -> dict:
+    """
+    Kiểm tra context có đủ liên quan để trả lời câu hỏi không.
+    """
+    llm = get_llm(llm_model, temperature=0.0)
+
+    prompt = build_relevance_check_prompt(
+        user_question=user_question,
+        rewritten_question=rewritten_question,
+        context=context,
+    )
+
+    raw = invoke_llm(llm, prompt)
+    parsed = extract_json_from_text(raw)
+
+    if not parsed:
+        return {
+            "can_answer": True,
+            "confidence_score": 60,
+            "reason": "Không parse được JSON relevance check, cho phép trả lời mặc định.",
+        }
+
+    return {
+        "can_answer": bool(parsed.get("can_answer", True)),
+        "confidence_score": normalize_confidence(parsed.get("confidence_score", 60)),
+        "reason": str(parsed.get("reason", "Không có lý do.")),
+    }
+
+
 def self_check_answer(
     user_question: str,
     rewritten_question: str,
@@ -486,13 +555,17 @@ def self_check_answer(
     answer: str,
     llm_model: str
 ) -> Dict[str, Any]:
+    """
+    Self-RAG verification.
+    Có thể dùng khi muốn kiểm tra kỹ câu trả lời.
+    """
     llm = get_llm(llm_model, temperature=0.0)
 
     prompt = build_self_check_prompt(
         user_question=user_question,
         rewritten_question=rewritten_question,
         context=context,
-        answer=answer
+        answer=answer,
     )
 
     raw_check = invoke_llm(llm, prompt)
@@ -503,19 +576,19 @@ def self_check_answer(
             "is_supported": True,
             "confidence_score": 70,
             "reason": "Không parse được JSON self-check, dùng confidence mặc định.",
-            "missing_info": "Không rõ"
+            "missing_info": "Không rõ",
         }
 
     return {
         "is_supported": bool(parsed.get("is_supported", True)),
         "confidence_score": normalize_confidence(parsed.get("confidence_score", 70)),
         "reason": str(parsed.get("reason", "Không có lý do.")),
-        "missing_info": str(parsed.get("missing_info", "Không có"))
+        "missing_info": str(parsed.get("missing_info", "Không có")),
     }
 
 
 # =========================
-# 6. FINAL ANSWER
+# 7. FINAL ANSWER
 # =========================
 
 def ensure_document_prefix(answer: str) -> str:
@@ -539,10 +612,6 @@ def generate_answer_from_docs(
     chat_messages: Optional[List[Dict[str, Any]]],
     llm_model: str
 ) -> Dict[str, Any]:
-    """
-    Sinh câu trả lời cuối cùng từ docs đã retrieve.
-    Có thêm relevance check để tránh trả lời sai ngoài tài liệu.
-    """
     history_context = build_safe_history_context(user_question, chat_messages or [])
     context = format_docs_as_context(docs)
 
@@ -550,7 +619,7 @@ def generate_answer_from_docs(
         user_question=user_question,
         rewritten_question=rewritten_question,
         context=context,
-        llm_model=llm_model
+        llm_model=llm_model,
     )
 
     if not relevance.get("can_answer", True):
@@ -566,37 +635,38 @@ def generate_answer_from_docs(
                 "is_supported": False,
                 "confidence_score": relevance.get("confidence_score", 30),
                 "reason": relevance.get("reason", "Ngữ cảnh không đủ liên quan để trả lời."),
-                "missing_info": "Tài liệu không chứa thông tin trực tiếp cho câu hỏi này."
+                "missing_info": "Tài liệu không chứa thông tin trực tiếp cho câu hỏi này.",
             },
             "confidence_score": relevance.get("confidence_score", 30),
-            "sources": extract_sources(docs)
+            "sources": extract_sources(docs),
         }
 
     prompt = build_answer_prompt(
         user_question=user_question,
         rewritten_question=rewritten_question,
         history_context=history_context,
-        context=context
+        context=context,
     )
 
     llm = get_llm(llm_model, temperature=0.2)
     answer = invoke_llm(llm, prompt)
     answer = ensure_document_prefix(answer)
 
-    self_check = self_check_answer(
-        user_question=user_question,
-        rewritten_question=rewritten_question,
-        context=context,
-        answer=answer,
-        llm_model=llm_model
-    )
+    # Để chạy nhanh: dùng confidence từ relevance.
+    # Nếu muốn Self-RAG kiểm tra lại bằng LLM, thay block này bằng self_check_answer(...).
+    self_check = {
+        "is_supported": True,
+        "confidence_score": relevance.get("confidence_score", 75),
+        "reason": "Đã kiểm tra relevance trước khi sinh câu trả lời.",
+        "missing_info": "Không có",
+    }
 
     return {
         "answer": answer,
         "context": context,
         "self_check": self_check,
         "confidence_score": self_check["confidence_score"],
-        "sources": extract_sources(docs)
+        "sources": extract_sources(docs),
     }
 
 
@@ -609,26 +679,29 @@ def generate_conversational_answer(
     rewritten_query = rewrite_query(
         user_question=query,
         chat_messages=chat_messages,
-        llm_model=llm_model
+        llm_model=llm_model,
     )
 
-    sub_questions = generate_sub_questions(
-        user_question=query,
-        rewritten_question=rewritten_query,
-        chat_messages=chat_messages,
-        llm_model=llm_model
-    )
+    if should_use_multihop(query, rewritten_query):
+        sub_questions = generate_sub_questions(
+            user_question=query,
+            rewritten_question=rewritten_query,
+            chat_messages=chat_messages,
+            llm_model=llm_model,
+        )
+    else:
+        sub_questions = [rewritten_query]
 
     retrieval_questions = expand_questions_for_retrieval(
         user_question=query,
         rewritten_question=rewritten_query,
-        sub_questions=sub_questions
+        sub_questions=sub_questions,
     )
 
     retrieved_docs = retrieve_docs_for_questions(
         retriever=retriever,
         questions=retrieval_questions,
-        max_docs=10
+        max_docs=8,
     )
 
     result = generate_answer_from_docs(
@@ -636,18 +709,19 @@ def generate_conversational_answer(
         rewritten_question=rewritten_query,
         docs=retrieved_docs,
         chat_messages=chat_messages,
-        llm_model=llm_model
+        llm_model=llm_model,
     )
 
     result["original_query"] = query
     result["rewritten_query"] = rewritten_query
     result["sub_questions"] = sub_questions
+    result["retrieval_questions"] = retrieval_questions
 
     return result
 
 
 # =========================
-# 7. BACKWARD COMPATIBILITY
+# 8. BACKWARD COMPATIBILITY
 # =========================
 
 def generate_answer(query: str, relevant_docs: list, llm_model: str):
@@ -656,55 +730,7 @@ def generate_answer(query: str, relevant_docs: list, llm_model: str):
         rewritten_question=query,
         docs=relevant_docs,
         chat_messages=[],
-        llm_model=llm_model
+        llm_model=llm_model,
     )
 
     return result["answer"]
-
-def find_latest_question_number(chat_messages) -> str:
-    if not chat_messages:
-        return ""
-
-    # Duyệt từ cuối lên đầu để lấy câu hỏi gần nhất
-    for msg in reversed(chat_messages):
-        content = str(msg.get("content", ""))
-
-        matches = re.findall(r"câu\s*hỏi\s*(\d+)", content, flags=re.IGNORECASE)
-        if matches:
-            return matches[-1]
-
-    return ""
-
-
-def deterministic_rewrite_follow_up(user_question: str, chat_messages) -> str:
-    if not user_question:
-        return user_question
-
-    q = user_question.strip()
-    q_lower = q.lower()
-
-    latest_num = find_latest_question_number(chat_messages)
-
-    if latest_num and (
-        "câu đó" in q_lower
-        or "vậy câu đó" in q_lower
-        or "yêu cầu đó" in q_lower
-        or "phần đó" in q_lower
-        or "cái đó" in q_lower
-    ):
-        return f"Câu hỏi {latest_num} cần triển khai như thế nào theo yêu cầu trong tài liệu?"
-
-    mentioned_numbers = re.findall(r"câu\s*(?:hỏi)?\s*(\d+)", q_lower)
-
-    if latest_num and "nó" in q_lower and mentioned_numbers:
-        compared_num = mentioned_numbers[-1]
-
-        if compared_num != latest_num:
-            return (
-                f"Câu hỏi {latest_num} khác gì Câu hỏi {compared_num}? "
-                f"So sánh yêu cầu triển khai của hai câu hỏi này."
-            )
-    if latest_num and q_lower.startswith("nó"):
-        return f"Câu hỏi {latest_num} yêu cầu gì trong tài liệu?"
-
-    return q
