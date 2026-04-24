@@ -52,12 +52,15 @@ def build_answer_prompt(
 Bạn là SmartDoc AI, một hệ thống hỏi đáp tài liệu theo kiến trúc RAG.
 
 QUY TẮC BẮT BUỘC:
+QUY TẮC BẮT BUỘC:
 1. Chỉ trả lời dựa trên phần "Ngữ cảnh đọc từ tài liệu".
-2. Nếu tài liệu không có thông tin, hãy nói rõ: "Không tìm thấy thông tin này trong tài liệu."
-3. Không được bịa thêm thông tin ngoài tài liệu.
-4. Câu trả lời phải bắt đầu bằng câu: "Nội dung dưới đây được đọc từ tài liệu:"
-5. Trả lời bằng tiếng Việt, rõ ràng, có thể dùng gạch đầu dòng nếu cần.
-6. Nếu câu hỏi là câu hỏi nối tiếp, hãy dùng lịch sử hội thoại để hiểu ý người dùng.
+2. Nếu tài liệu không có thông tin, bắt buộc trả lời: "Không tìm thấy thông tin này trong tài liệu."
+3. Nếu câu hỏi không liên quan trực tiếp đến ngữ cảnh đọc từ tài liệu, bắt buộc trả lời: "Không tìm thấy thông tin này trong tài liệu."
+4. Không được bịa thêm thông tin ngoài tài liệu.
+5. Không được tự dùng kiến thức bên ngoài.
+6. Câu trả lời phải bắt đầu bằng câu: "Nội dung dưới đây được đọc từ tài liệu:"
+7. Trả lời bằng tiếng Việt, rõ ràng, có thể dùng gạch đầu dòng nếu cần.
+8. Nếu câu hỏi là câu hỏi nối tiếp, hãy dùng lịch sử hội thoại để hiểu ý người dùng.
 
 Lịch sử hội thoại:
 {history_context}
@@ -111,6 +114,38 @@ Ngữ cảnh đọc từ tài liệu:
 
 Câu trả lời cần kiểm tra:
 {answer}
+
+JSON:
+""".strip()
+
+def build_relevance_check_prompt(user_question: str, rewritten_question: str, context: str) -> str:
+    return f"""
+Bạn là bộ kiểm tra độ liên quan cho hệ thống RAG.
+
+Nhiệm vụ:
+- Chỉ dựa vào "Ngữ cảnh đọc từ tài liệu".
+- Kiểm tra xem ngữ cảnh có chứa thông tin trực tiếp để trả lời câu hỏi hay không.
+- Nếu câu hỏi hỏi kiến thức bên ngoài tài liệu, trả về can_answer=false.
+- Nếu ngữ cảnh chỉ liên quan chung chung nhưng không đủ trả lời, trả về can_answer=false.
+- Không dùng kiến thức bên ngoài.
+
+Chỉ trả về JSON hợp lệ, không markdown.
+
+Schema:
+{{
+  "can_answer": true,
+  "confidence_score": 85,
+  "reason": "Ngữ cảnh có thông tin trực tiếp để trả lời câu hỏi."
+}}
+
+Câu hỏi gốc:
+{user_question}
+
+Câu hỏi đã viết lại:
+{rewritten_question}
+
+Ngữ cảnh đọc từ tài liệu:
+{context}
 
 JSON:
 """.strip()
