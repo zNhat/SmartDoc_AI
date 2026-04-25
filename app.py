@@ -4,6 +4,8 @@ import tempfile
 import uuid
 from datetime import datetime
 
+from src.relevance.reranker import Chunk, KeywordReranker
+from src.relevance.citation import CitationBuilder
 from src.utils.storage import save_sessions_to_disk, load_sessions_from_disk
 from src.ui.sidebar import render_sidebar
 from src.ui.chat_area import render_chat_history
@@ -243,6 +245,33 @@ if prompt_text := st.chat_input("Nhập câu hỏi..."):
                         retriever = get_retriever(vector_store, search_type, k_value, filter_dict)
 
                     # ── Pipeline chính ─────────────────────────────────────
+                     # ====================== THÀNH VIÊN 4: RE-RANK + CITATION ======================
+                    raw_docs = retriever.get_relevant_documents(prompt_text)
+
+                    chunks = [
+                        Chunk(
+                            chunk_id=str(i),
+                            text=doc.page_content,
+                            source=doc.metadata.get("file_name", "Tài liệu đã upload"),
+                            page=doc.metadata.get("page", i+1),
+                            initial_score=1.0 - i * 0.05
+                        )
+                        for i, doc in enumerate(raw_docs)
+                    ]
+
+                    reranker = KeywordReranker()
+                    reranked = reranker.rerank(prompt_text, chunks, top_k=5)
+
+                    builder = CitationBuilder()
+                    citations = builder.build_from_chunks(reranked.top_chunks)
+                    # ==========================================================================
+
+                    # ✅ Pipeline mới:
+                    # - Memory
+                    # - Query rewriting
+                    # - Multi-hop retrieval
+                    # - Self-RAG verification
+                    # - Confidence scoring
                     result = generate_conversational_answer(
                         query         = prompt_text,
                         retriever     = retriever,
@@ -250,7 +279,21 @@ if prompt_text := st.chat_input("Nhập câu hỏi..."):
                         llm_model     = config_params["llm_model"]
                     )
 
-                    answer           = result.get("answer", "Không tạo được câu trả lời.")
+                    # ====================== THÀNH VIÊN 4: GHI ĐÈ SOURCES ======================
+                    if citations:
+                        result["sources"] = [
+                            {
+                                "index": c.citation_id,
+                                "source": c.source_file,
+                                "page": c.page,
+                                "content": c.excerpt,
+                                "score": round(c.rerank_score, 4),
+                            }
+                            for c in citations
+                        ]
+                    # ==========================================================================
+
+                    answer = result.get("answer", "Không tạo được câu trả lời.")
                     confidence_score = result.get("confidence_score", 70)
                     rewritten_query  = result.get("rewritten_query", prompt_text)
                     sub_questions    = result.get("sub_questions", [])
