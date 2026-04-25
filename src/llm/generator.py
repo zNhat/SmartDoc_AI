@@ -30,7 +30,7 @@ def get_llm(llm_model: str, temperature: float = 0.3) -> Ollama:
         repeat_penalty=1.1,
         num_predict=512,
         num_ctx=4096,
-        timeout=120,
+        timeout=600,
     )
 
 
