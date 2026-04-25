@@ -109,11 +109,60 @@ def find_latest_user_topic(chat_messages) -> str:
 
     return ""
 
+def find_latest_assistant_answer(chat_messages) -> str:
+    """
+    Lấy câu trả lời assistant gần nhất để hiểu 'câu đó', 'nó' đang nói về gì.
+    """
+    if not chat_messages:
+        return ""
+
+    for msg in reversed(chat_messages):
+        if msg.get("role") == "assistant":
+            content = str(msg.get("content", "")).strip()
+            if content:
+                return content
+
+    return ""
+
+
+def extract_focus_from_previous_answer(answer: str) -> str:
+    """
+    Rút ra trọng tâm từ câu trả lời trước.
+    Ví dụ:
+    'Câu hỏi 6 ... Implement Conversational RAG'
+    -> 'Câu hỏi 6 Implement Conversational RAG'
+    """
+    if not answer:
+        return ""
+
+    text = answer.replace("Nội dung dưới đây được đọc từ tài liệu:", "").strip()
+    text = re.sub(r"\s+", " ", text)
+
+    # Bắt dạng: Câu hỏi 6 ... yêu cầu "Implement Conversational RAG"
+    match = re.search(
+        r"(câu\s*(?:hỏi)?\s*\d+).*?(?:yêu cầu|là)\s+[\"“']?([^\"“”'.:\n]+)",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    if match:
+        question_part = match.group(1).strip()
+        title_part = match.group(2).strip()
+        title_part = title_part.strip(" .,:;\"“”'")
+        return f"{question_part} {title_part}"
+
+    # Fallback: lấy câu đầu tiên ngắn gọn
+    first_sentence = re.split(r"[.\n]", text)[0].strip()
+
+    if len(first_sentence) <= 180:
+        return first_sentence
+
+    return ""
 
 def deterministic_rewrite_follow_up(user_question: str, chat_messages) -> str:
     """
     Rewrite nhẹ các câu follow-up phổ biến.
-    Không hard-code nội dung tài liệu.
+    Không hard-code nội dung tài liệu, chỉ xử lý theo số câu hỏi nếu có.
     """
     if not user_question:
         return user_question
@@ -126,7 +175,39 @@ def deterministic_rewrite_follow_up(user_question: str, chat_messages) -> str:
     if not latest_topic:
         return q
 
-    if (
+    # Lấy số câu hỏi gần nhất trong câu trước, ví dụ: "Câu hỏi 10 là gì?"
+    latest_numbers = re.findall(
+        r"câu\s*(?:hỏi)?\s*(\d+)",
+        latest_topic.lower(),
+        flags=re.IGNORECASE
+    )
+
+    latest_number = latest_numbers[-1] if latest_numbers else ""
+
+    # Lấy số câu hỏi được nhắc trong câu hiện tại, ví dụ: "nó khác gì câu 6?"
+    current_numbers = re.findall(
+        r"câu\s*(?:hỏi)?\s*(\d+)",
+        q_lower,
+        flags=re.IGNORECASE
+    )
+
+    # Trường hợp: "Nó khác gì câu 6?"
+    if latest_number and current_numbers and (
+        "khác gì" in q_lower
+        or "so với" in q_lower
+        or "so sánh" in q_lower
+        or "khác nhau" in q_lower
+    ):
+        other_number = current_numbers[-1]
+
+        if other_number != latest_number:
+            return (
+                f"So sánh Câu hỏi {latest_number} và Câu hỏi {other_number} "
+                f"theo yêu cầu trong tài liệu."
+            )
+
+    # Trường hợp: "Vậy câu đó cần làm như thế nào?"
+    if latest_number and (
         "câu đó" in q_lower
         or "vậy câu đó" in q_lower
         or "cái đó" in q_lower
@@ -136,10 +217,14 @@ def deterministic_rewrite_follow_up(user_question: str, chat_messages) -> str:
         or "mục đó" in q_lower
         or "ý đó" in q_lower
     ):
-        return f"Dựa trên câu hỏi trước: '{latest_topic}', hãy trả lời câu hỏi nối tiếp: '{q}'"
+        return (
+            f"Câu hỏi {latest_number} cần làm hoặc cần triển khai như thế nào "
+            f"theo yêu cầu trong tài liệu?"
+        )
 
-    if q_lower.startswith("nó"):
-        return f"Dựa trên nội dung đang được nhắc đến ở câu hỏi trước: '{latest_topic}', hãy trả lời: '{q}'"
+    # Trường hợp: "Nó yêu cầu gì?"
+    if latest_number and q_lower.startswith("nó"):
+        return f"Câu hỏi {latest_number} yêu cầu gì trong tài liệu?"
 
     return q
 
@@ -373,6 +458,8 @@ def should_use_multihop(user_question: str, rewritten_question: str) -> bool:
     Chỉ dùng multi-hop cho câu hỏi phức tạp để app chạy nhanh hơn.
     """
     combined = f"{user_question} {rewritten_question}".lower()
+    if is_follow_up_question(user_question):
+        return False
 
     markers = [
         "so sánh",
@@ -421,6 +508,45 @@ def generate_sub_questions(
 
     return sub_questions[:3]
 
+def get_question_numbers(text: str) -> List[str]:
+    """
+    Lấy các số câu hỏi được nhắc tới.
+    Ví dụ: "So sánh Câu 6 và Câu 10" -> ["6", "10"]
+    """
+    if not text:
+        return []
+
+    numbers = re.findall(
+        r"câu\s*(?:hỏi)?\s*(\d+)",
+        text.lower(),
+        flags=re.IGNORECASE
+    )
+
+    unique_numbers = []
+    seen = set()
+
+    for num in numbers:
+        if num not in seen:
+            seen.add(num)
+            unique_numbers.append(num)
+
+    return unique_numbers
+
+
+def is_compare_question(text: str) -> bool:
+    if not text:
+        return False
+
+    text = text.lower()
+
+    compare_markers = [
+        "so sánh",
+        "khác gì",
+        "khác nhau",
+        "so với",
+    ]
+
+    return any(marker in text for marker in compare_markers)
 
 def expand_questions_for_retrieval(
     user_question: str,
@@ -429,18 +555,29 @@ def expand_questions_for_retrieval(
 ) -> list:
     """
     Tạo danh sách query để retrieve.
-    Bản này tổng quát, không hard-code theo file SmartDoc.
+    Ưu tiên các câu hỏi dạng Câu 6, Câu 10 trước để tránh retriever lấy nhầm mục lục/tổng quan.
     """
     questions = []
 
+    combined_query = f"{user_question} {rewritten_question}"
+    numbers = get_question_numbers(combined_query)
+
+    # Ưu tiên query theo số câu hỏi trước
+    for number in numbers:
+        questions.append(f"8.2.{number} Câu hỏi {number}")
+        questions.append(f"Câu hỏi {number}")
+        questions.append(f"Câu hỏi {number} yêu cầu")
+        questions.append(f"Câu hỏi {number} Yêu cầu:")
+
+    # Sau đó mới tới rewritten query và câu hỏi gốc
     if rewritten_question:
         questions.append(rewritten_question)
 
-    if user_question and user_question not in questions:
+    if user_question:
         questions.append(user_question)
 
     for q in sub_questions:
-        if q and q not in questions:
+        if q:
             questions.append(q)
 
     unique_questions = []
@@ -448,11 +585,12 @@ def expand_questions_for_retrieval(
 
     for q in questions:
         q = q.strip()
+
         if q and q not in seen:
             seen.add(q)
             unique_questions.append(q)
 
-    return unique_questions[:4]
+    return unique_questions[:10]
 
 
 def retrieve_docs_for_questions(
@@ -523,6 +661,32 @@ def check_context_relevance(
     """
     Kiểm tra context có đủ liên quan để trả lời câu hỏi không.
     """
+    combined_query = f"{user_question} {rewritten_question}"
+    numbers = get_question_numbers(combined_query)
+
+    if is_compare_question(combined_query) and len(numbers) >= 2:
+        context_lower = context.lower()
+
+        found_all = True
+
+        for number in numbers[:2]:
+            markers = [
+                f"câu hỏi {number}",
+                f"câu {number}",
+                f"8.2.{number}",
+            ]
+
+            if not any(marker in context_lower for marker in markers):
+                found_all = False
+                break
+
+        if found_all:
+            return {
+                "can_answer": True,
+                "confidence_score": 85,
+                "reason": "Ngữ cảnh có thông tin về các câu hỏi cần so sánh."
+            }
+
     llm = get_llm(llm_model, temperature=0.0)
 
     prompt = build_relevance_check_prompt(
@@ -546,7 +710,6 @@ def check_context_relevance(
         "confidence_score": normalize_confidence(parsed.get("confidence_score", 60)),
         "reason": str(parsed.get("reason", "Không có lý do.")),
     }
-
 
 def self_check_answer(
     user_question: str,
