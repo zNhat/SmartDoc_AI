@@ -272,11 +272,13 @@ def build_source_label(doc: Any, index: int) -> str:
         or "Tài liệu đã upload"
     )
 
-    page = (
-        metadata.get("page")
-        or metadata.get("page_number")
-        or metadata.get("page_label")
-    )
+    page = metadata.get("page", None)
+
+    if page is None:
+        page = metadata.get("page_number", None)
+
+    if page is None:
+        page = metadata.get("page_label", None)
 
     page_text = format_page_number(page)
 
@@ -358,11 +360,13 @@ def extract_sources(docs: List[Any]) -> List[Dict[str, Any]]:
             or "Tài liệu đã upload"
         )
 
-        page = (
-            metadata.get("page")
-            or metadata.get("page_number")
-            or metadata.get("page_label")
-        )
+        page = metadata.get("page", None)
+
+        if page is None:
+            page = metadata.get("page_number", None)
+
+        if page is None:
+            page = metadata.get("page_label", None)
 
         sources.append({
             "index": i,
