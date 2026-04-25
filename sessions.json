@@ -33,7 +33,7 @@
                 ]
             }
         ],
-        "file_name": "project_report_final (1).pdf"
+        "file_name": null
     },
     "973ec9c3-4aa2-410a-892c-f8c4e4f78ad7": {
         "title": "chức năng quản lý ảnh ...",
@@ -847,6 +847,16 @@
                 }
             }
         ],
-        "file_name": "project_report_final.pdf"
+        "file_name": null
+    },
+    "4b7bc1ff-1a23-496f-bbe4-db5d61ef33d0": {
+        "title": "tài liệu này nói về cái g...",
+        "messages": [
+            {
+                "role": "user",
+                "content": "tài liệu này nói về cái gì?"
+            }
+        ],
+        "file_name": "PTTKHTTT_c6 - mo hinh hoa xu ly (new).pdf"
     }
 }
