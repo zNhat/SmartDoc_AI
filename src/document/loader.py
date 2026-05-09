@@ -17,7 +17,20 @@ def process_document(file_path: str, chunk_size: int, chunk_overlap: int):
     # ====================== LOAD FILE ======================
     if ext == ".pdf":
         loader = PDFPlumberLoader(file_path)
-        raw_docs = loader.load()
+        pages = loader.load()
+
+        # ✅ CHIẾN THUẬT MERGE MỚI: Nối trang mềm mại, KHÔNG dùng \n\n
+        full_text = ""
+        for i, page in enumerate(pages):
+            # Xóa các dấu xuống dòng kép thừa thãi trong mỗi trang (nếu có)
+            # để tránh bị cắt vụn bên trong trang
+            clean_content = page.page_content.replace("\n\n", " ") 
+            
+            # Gắn số trang vào giữa câu như một thẻ [Trang X]
+            full_text += f" [Sang Trang {i + 1}] {clean_content} "
+
+        # Đóng gói lại thành 1 Document duy nhất
+        raw_docs = [Document(page_content=full_text, metadata={"source": file_path})]
 
     elif ext == ".docx":
         # ✅ dùng docx2txt thay vì python-docx
@@ -27,7 +40,7 @@ def process_document(file_path: str, chunk_size: int, chunk_overlap: int):
         if not full_text or full_text.strip() == "":
             raise ValueError("File DOCX không có nội dung!")
 
-        raw_docs = [Document(page_content=full_text)]
+        raw_docs = [Document(page_content=full_text, metadata={"source": file_path})]
 
     else:
         raise ValueError("Chỉ hỗ trợ PDF và DOCX")

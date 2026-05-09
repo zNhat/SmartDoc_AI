@@ -28,8 +28,8 @@ def get_llm(llm_model: str, temperature: float = 0.3) -> Ollama:
         temperature=temperature,
         top_p=0.9,
         repeat_penalty=1.1,
-        num_predict=512,
-        num_ctx=4096,
+        num_predict=1024, # Tăng giới hạn độ dài câu trả lời
+        num_ctx=8192,     # Tăng cửa sổ ngữ cảnh để chứa được nhiều chunk hơn
         timeout=600,
     )
 
@@ -285,37 +285,63 @@ def build_source_label(doc: Any, index: int) -> str:
     return f"Nguồn {index} | File: {source} | Trang: {page_text}"
 
 
-def format_docs_as_context(docs: List[Any], max_chars_per_doc: int = 1400) -> str:
+def format_docs_as_context(docs: List[Any], max_chars_per_doc: int = 4000) -> str:
     """
     Ghép docs thành context.
-    Giới hạn mỗi chunk để tránh prompt quá dài.
+    ĐÃ NÂNG CẤP: Tự động gộp các chunk thuộc cùng một trang lại với nhau 
+    để AI đọc không bị đứt mạch ngữ cảnh.
     """
     if not docs:
         return "Không có đoạn tài liệu liên quan được truy xuất."
 
-    context_parts = []
-
-    for i, doc in enumerate(docs, start=1):
+    from collections import defaultdict
+    
+    # Gom nhóm các chunk theo (Tên_file, Số_trang)
+    grouped_docs = defaultdict(list)
+    
+    for doc in docs:
+        metadata = get_doc_metadata(doc)
+        source = (
+            metadata.get("file_name")
+            or metadata.get("filename")
+            or metadata.get("source")
+            or "Tài liệu đã upload"
+        )
+        
+        page = metadata.get("page", None)
+        if page is None:
+            page = metadata.get("page_number", None)
+        if page is None:
+            page = metadata.get("page_label", None)
+            
         content = get_doc_content(doc)
+        if content:
+            grouped_docs[(source, page)].append(content)
 
-        if not content:
-            continue
+    context_parts = []
+    part_index = 1
 
-        if len(content) > max_chars_per_doc:
-            content = content[:max_chars_per_doc] + "..."
+    # Duyệt qua từng nhóm trang để ghép nối
+    for (source, page), contents in grouped_docs.items():
+        # Nối các chunk lại bằng dấu chấm lửng chuyển tiếp
+        merged_content = "\n...[nội dung liền kề]...\n".join(contents)
 
-        source_label = build_source_label(doc, i)
+        # Giới hạn an toàn (nới lỏng lên 4000 ký tự)
+        if len(merged_content) > max_chars_per_doc:
+            merged_content = merged_content[:max_chars_per_doc] + "\n...[đã cắt bớt do quá dài]"
+
+        page_display = format_page_number(page)
 
         context_parts.append(
-            f"[Đoạn {i}]\n"
-            f"{source_label}\n"
-            f"Nội dung:\n{content}"
+            f"[Nguồn {part_index} | File: {source} | Trang: {page_display}]\n"
+            f"Nội dung:\n{merged_content}"
         )
+        part_index += 1
 
     if not context_parts:
         return "Không có đoạn tài liệu liên quan được truy xuất."
 
-    return "\n\n".join(context_parts)
+    return "\n\n========================\n\n".join(context_parts)
 
 
 def doc_unique_key(doc: Any) -> str:
@@ -329,7 +355,7 @@ def doc_unique_key(doc: Any) -> str:
     return f"{source}|{page}|{content_head}"
 
 
-def deduplicate_docs(docs: List[Any], max_docs: int = 8) -> List[Any]:
+def deduplicate_docs(docs: List[Any], max_docs: int = 15) -> List[Any]:
     unique_docs = []
     seen = set()
 
@@ -600,7 +626,7 @@ def expand_questions_for_retrieval(
 def retrieve_docs_for_questions(
     retriever: Any,
     questions: List[str],
-    max_docs: int = 8
+    max_docs: int = 15
 ) -> List[Any]:
     all_docs = []
 
@@ -868,7 +894,7 @@ def generate_conversational_answer(
     retrieved_docs = retrieve_docs_for_questions(
         retriever=retriever,
         questions=retrieval_questions,
-        max_docs=8,
+        max_docs=15,
     )
 
     result = generate_answer_from_docs(

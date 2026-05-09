@@ -211,15 +211,32 @@ class RAGRerankerPipeline:
         return result
 
     def format_context(self, result: RerankedResult) -> str:
-        """Định dạng các chunk thành context string để đưa vào LLM prompt."""
+        """Định dạng các chunk thành context string để đưa vào LLM prompt.
+        ĐÃ NÂNG CẤP: Gộp các đoạn nằm trên cùng 1 trang lại để AI không bị đứt mạch đọc."""
+        from collections import defaultdict
+        
+        # Nhóm các đoạn lại theo (Tên file, Số trang)
+        grouped_chunks = defaultdict(list)
+        for chunk in result.top_chunks:
+            key = (chunk.source, chunk.page)
+            grouped_chunks[key].append(chunk)
+
         parts = []
-        for i, chunk in enumerate(result.top_chunks, 1):
+        # Duyệt qua từng trang và ghép nội dung lại
+        for (source, page), chunks_in_page in grouped_chunks.items():
+            # Nối text của các đoạn trong cùng 1 trang lại với nhau
+            combined_text = "\n...[nội dung liền kề]...\n".join(c.text for c in chunks_in_page)
+            
+            # Lấy điểm trung bình để tham khảo (hoặc lấy max)
+            avg_score = sum(c.rerank_score for c in chunks_in_page) / len(chunks_in_page)
+            
             parts.append(
-                f"[Đọc từ tài liệu - Nguồn: {chunk.source}, Trang: {chunk.page}]\n"
-                f"{chunk.text}\n"
-                f"(Điểm liên quan: {chunk.rerank_score:.4f})"
+                f"[Nguồn: {source} | Trang: {page}]\n"
+                f"{combined_text}\n"
+                f"(Độ liên quan trung bình của trang: {avg_score:.4f})"
             )
-        return "\n\n---\n\n".join(parts)
+            
+        return "\n\n------------------------\n\n".join(parts)
 
 
 # ---------------------------------------------------------------------------

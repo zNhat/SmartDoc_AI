@@ -9,7 +9,7 @@ from src.utils.storage import save_sessions_to_disk
 def render_sidebar():
     """Render sidebar với quản lý phiên, cài đặt hệ thống và lọc metadata (Câu hỏi 8)."""
     with st.sidebar:
-        st.title("🗂️ Lịch sử hội thoại")
+        st.title("SmartDoc AI - Intelligent Document Q&A System")
 
         curr_id = st.session_state.current_session_id
 
@@ -103,7 +103,7 @@ def render_sidebar():
         with st.expander("⚙️ Cài đặt hệ thống"):
             st.info("Vector Store: **FAISS**")
             chunk_size    = st.slider("Chunk Size",    500,  2000, 1500, 100)
-            chunk_overlap = st.slider("Chunk Overlap",  50,   300,  200,  50)
+            chunk_overlap = st.slider("Chunk Overlap",  100,   500,  300,  50)
 
             search_type = st.selectbox(
                 "Tìm kiếm",
@@ -127,7 +127,7 @@ def render_sidebar():
                 bm25_weight = round(1.0 - vector_weight, 1)
                 st.caption(f"→ BM25 weight: **{bm25_weight}**")
 
-            k_value   = st.slider("Số đoạn (k)", 3, 8, 5)
+            k_value   = st.slider("Số đoạn (k)", 3, 15, 10)
             llm_model = st.selectbox(
                 "Mô hình LLM",
                 ["qwen2.5:7b", "llama3.2:1b", "qwen2.5:0.5b",

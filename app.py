@@ -318,7 +318,7 @@ config_params = render_sidebar()
 
 # ====================== CÀI ĐẶT CÂU 9: RE-RANKING ======================
 
-with st.sidebar.expander("🧠 Re-ranking - Câu 9"):
+with st.sidebar.expander("🧠 Re-ranking"):
     use_cross_encoder = st.checkbox(
         "Bật Cross-Encoder Re-ranker",
         value=False,
@@ -332,16 +332,16 @@ with st.sidebar.expander("🧠 Re-ranking - Câu 9"):
         "Số chunk lấy trước re-rank",
         min_value=5,
         max_value=30,
-        value=12,
+        value=20,
         step=1,
     )
 
-    default_rerank_top_k = min(max(config_params.get("k_value", 5), 3), 10)
+    default_rerank_top_k = min(max(config_params.get("k_value", 5), 3), 15)
 
     rerank_top_k = st.slider(
         "Số chunk giữ lại sau re-rank",
         min_value=3,
-        max_value=10,
+        max_value=15,
         value=default_rerank_top_k,
         step=1,
     )
@@ -580,122 +580,7 @@ if prompt_text := st.chat_input("Nhập câu hỏi..."):
                             src["page"] = get_page_display_from_source(src)
 
                     st.markdown(answer)
-                    st.divider()
-
-                    st.markdown("### 🧠 Advanced RAG Information")
-
-                    col1, col2 = st.columns([1, 3])
-
-                    with col1:
-                        st.metric("Confidence", f"{confidence_score}%")
-                        st.progress(confidence_score / 100)
-                        st.caption(f"🔍 Phương pháp: `{search_method}`")
-                        st.caption(f"📥 Retrieve top N: `{retrieve_top_n}`")
-                        st.caption(f"🏆 Rerank top K: `{rerank_top_k}`")
-
-                    with col2:
-                        st.markdown("**Câu hỏi đã được viết lại:**")
-                        st.info(rewritten_query)
-
-                    with st.expander("🔍 Multi-hop questions"):
-                        if sub_questions:
-                            for i, question in enumerate(sub_questions, start=1):
-                                st.markdown(f"**Hop {i}:** {question}")
-                        else:
-                            st.caption("Không có câu hỏi con.")
-
-                    with st.expander("✅ Self-RAG Verification"):
-                        is_supported = self_check.get("is_supported", True)
-                        reason = self_check.get("reason", "Không có")
-                        missing_info = self_check.get("missing_info", "Không có")
-
-                        st.markdown(f"**Được hỗ trợ bởi tài liệu:** `{is_supported}`")
-                        st.markdown(f"**Lý do:** {reason}")
-                        st.markdown(f"**Thông tin còn thiếu:** {missing_info}")
-
-                    if search_type == "hybrid" and documents:
-                        with st.expander("📊 So sánh Hybrid vs Pure Vector Search"):
-                            try:
-                                cmp = get_retrieval_comparison(
-                                    vector_store,
-                                    documents,
-                                    rewritten_query,
-                                    k=k_value,
-                                )
-
-                                c1, c2, c3 = st.columns(3)
-
-                                with c1:
-                                    st.metric("🔷 Pure Vector", f"{cmp['vector']['count']} docs")
-
-                                with c2:
-                                    st.metric("🔑 BM25 Keyword", f"{cmp['bm25']['count']} docs")
-
-                                with c3:
-                                    st.metric("⚡ Hybrid", f"{cmp['hybrid']['count']} docs")
-
-                                overlap = cmp["overlap"]
-                                st.markdown(
-                                    f"- Chung (Vector ∩ BM25): **{overlap['vector_and_bm25_common']}** đoạn  \n"
-                                    f"- Chỉ trong Vector: **{overlap['vector_only']}** đoạn  \n"
-                                    f"- Chỉ trong BM25: **{overlap['bm25_only']}** đoạn  \n"
-                                    f"- Hybrid bổ sung so với Vector thuần: **{overlap['hybrid_extra_vs_vector']}** đoạn"
-                                )
-
-                            except Exception as e_cmp:
-                                st.caption(f"Không lấy được so sánh: {e_cmp}")
-
-                    st.markdown("### 📑 Xem nguồn tham khảo")
-
-                    if sources:
-                        for src in sources:
-                            index = src.get("index", "")
-                            source_name = src.get("source", "Tài liệu đã upload")
-                            page = get_page_display_from_source(src)
-                            content = src.get("content", "")
-                            meta = src.get("metadata", {}) or {}
-
-                            cat = meta.get("doc_category", "")
-                            up_date = meta.get("upload_date", "")
-                            rerank_score = meta.get("rerank_score", src.get("score", None))
-                            rank_before = meta.get("rank_before", None)
-                            rank_after = meta.get("rank_after", None)
-                            reranker_source = meta.get("reranker", "")
-
-                            title = f"Đoạn {index} — 📄 {source_name} · Trang {page}"
-
-                            with st.expander(title, expanded=False):
-                                info_cols = st.columns(3)
-
-                                with info_cols[0]:
-                                    if cat:
-                                        st.caption(f"🏷️ Loại: {cat}")
-
-                                with info_cols[1]:
-                                    if up_date:
-                                        st.caption(f"🕒 Upload: {up_date}")
-
-                                with info_cols[2]:
-                                    if rerank_score is not None:
-                                        try:
-                                            st.caption(f"⭐ Rerank score: {float(rerank_score):.4f}")
-                                        except Exception:
-                                            st.caption(f"⭐ Rerank score: {rerank_score}")
-
-                                if reranker_source:
-                                    st.caption(f"🧠 Reranker: `{reranker_source}`")
-
-                                if rank_before and rank_after:
-                                    st.caption(
-                                        f"↕️ Rank trước: `{rank_before}` → sau re-rank: `{rank_after}`"
-                                    )
-
-                                st.markdown("**Context gốc được sử dụng:**")
-                                render_highlighted_context(content)
-
-                    else:
-                        st.caption("Không có nguồn tham khảo.")
-
+                    
                     source_texts = [src.get("content", "") for src in sources]
 
                     st.session_state.all_sessions[curr_id]["messages"].append(

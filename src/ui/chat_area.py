@@ -107,8 +107,11 @@ def normalize_sources(message):
         for i, src in enumerate(old_sources)
     ]
 
-
 def render_source_block(src):
+    """
+    Hàm này KHÔNG dùng expander nữa, chỉ in nội dung thẳng ra
+    (vì đã được bọc bởi expander lớn ở bên ngoài)
+    """
     index = src.get("index", "")
     source_name = src.get("source", "Tài liệu đã upload")
     page = get_page_display(src)
@@ -122,37 +125,29 @@ def render_source_block(src):
     rank_after = meta.get("rank_after", None)
     reranker_name = meta.get("reranker", "")
 
-    st.markdown(
-        f"### Đoạn {index} — 📄 `{source_name}` · Trang `{page}`"
-    )
+    # In tiêu đề đoạn (in đậm)
+    st.markdown(f"**Đoạn {index} — 📄 {source_name} · Trang {page}**")
 
+    # In các thông số phụ
     info_parts = []
-
     if cat:
-        info_parts.append(f"🏷️ Loại: `{cat}`")
-
+        info_parts.append(f"🏷️ `{cat}`")
     if up_date:
-        info_parts.append(f"🕒 Upload: `{up_date}`")
-
+        info_parts.append(f"🕒 `{up_date}`")
     if reranker_name:
-        info_parts.append(f"🧠 Reranker: `{reranker_name}`")
-
+        info_parts.append(f"🧠 `{reranker_name}`")
     if rerank_score is not None:
         try:
-            info_parts.append(f"⭐ Rerank score: `{float(rerank_score):.4f}`")
+            info_parts.append(f"⭐ Score: `{float(rerank_score):.4f}`")
         except Exception:
-            info_parts.append(f"⭐ Rerank score: `{rerank_score}`")
-
+            info_parts.append(f"⭐ Score: `{rerank_score}`")
     if rank_before and rank_after:
-        info_parts.append(f"↕️ Rank trước: `{rank_before}` → sau re-rank: `{rank_after}`")
+        info_parts.append(f"↕️ Rank: `{rank_before}` → `{rank_after}`")
 
     if info_parts:
         st.caption(" · ".join(info_parts))
 
-    st.markdown("**Context gốc được sử dụng:**")
     render_highlighted_context(source_content)
-
-    st.divider()
 
 
 def render_chat_history(messages_list):
@@ -161,11 +156,50 @@ def render_chat_history(messages_list):
         content = message.get("content", "")
 
         with st.chat_message(role):
+            # 1. In nội dung câu trả lời
             st.markdown(content)
 
             if role != "assistant":
                 continue
 
+            # ==========================================
+            # 2. VẼ LẠI KHỐI ĐÁNH GIÁ (ADVANCED RAG)
+            # ==========================================
+            advanced_rag = message.get("advanced_rag")
+            if advanced_rag:
+                st.divider()
+                st.markdown("### 🧠 Advanced RAG Information")
+
+                col1, col2 = st.columns([1, 3])
+
+                with col1:
+                    score = advanced_rag.get("confidence_score", 0)
+                    st.metric("Confidence", f"{score}%")
+                    st.progress(score / 100)
+                    st.caption(f"🔍 Phương pháp: `{advanced_rag.get('search_method', '')}`")
+
+                with col2:
+                    st.markdown("**Câu hỏi đã được viết lại:**")
+                    st.info(advanced_rag.get("rewritten_query", ""))
+
+                sub_questions = advanced_rag.get("sub_questions", [])
+                with st.expander("🔍 Multi-hop questions"):
+                    if sub_questions:
+                        for i, question in enumerate(sub_questions, start=1):
+                            st.markdown(f"**Hop {i}:** {question}")
+                    else:
+                        st.caption("Không có câu hỏi con.")
+
+                self_check = advanced_rag.get("self_check", {})
+                if self_check:
+                    with st.expander("✅ Self-RAG Verification"):
+                        st.markdown(f"**Được hỗ trợ bởi tài liệu:** `{self_check.get('is_supported', True)}`")
+                        st.markdown(f"**Lý do:** {self_check.get('reason', 'Không có')}")
+                        st.markdown(f"**Thông tin còn thiếu:** {self_check.get('missing_info', 'Không có')}")
+
+            # ==========================================
+            # 3. VẼ LẠI NGUỒN THAM KHẢO (1 NÚT ĐÓNG/MỞ DUY NHẤT)
+            # ==========================================
             if should_hide_sources(content):
                 continue
 
@@ -173,7 +207,12 @@ def render_chat_history(messages_list):
 
             if not sources:
                 continue
-
-            with st.expander("📑 Xem nguồn tham khảo"):
+            
+            # GỌI EXPANDER Ở ĐÂY ĐỂ BỌC TOÀN BỘ CÁC ĐOẠN LẠI
+            with st.expander("📑 Xem toàn bộ nguồn tham khảo"):
                 for src in sources:
                     render_source_block(src)
+                    
+                    # Thêm đường kẻ mờ phân tách giữa các đoạn (trừ đoạn cuối cùng)
+                    if src != sources[-1]:
+                        st.divider()
