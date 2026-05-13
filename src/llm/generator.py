@@ -808,7 +808,6 @@ def generate_answer_from_docs(
     history_context = build_safe_history_context(user_question, chat_messages or [])
     context = format_docs_as_context(docs)
 
-    # Vẫn chạy lấy điểm relevance score để hiển thị UI
     relevance = check_context_relevance(
         user_question=user_question,
         rewritten_question=rewritten_question,
@@ -816,9 +815,6 @@ def generate_answer_from_docs(
         llm_model=llm_model,
     )
 
-    # ========================================================
-    # 🛑 ĐÃ VÔ HIỆU HÓA BỘ LỌC CỨNG NHẮC (NGUYÊN NHÂN GÂY LỖI)
-    # ========================================================
     # if not relevance.get("can_answer", True):
     #     answer = (
     #         "Nội dung dưới đây được đọc từ tài liệu:\n"

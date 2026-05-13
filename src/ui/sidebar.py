@@ -5,21 +5,17 @@ import shutil
 
 from src.utils.storage import save_sessions_to_disk
 
-# ==========================================
-# CÁC HÀM DIALOG XUẤT HIỆN GIỮA MÀN HÌNH
-# ==========================================
-
-@st.dialog("⚠️ Xác nhận Xóa Chat")
+@st.dialog(" Xác nhận Xóa Chat")
 def confirm_delete_chat_dialog(curr_id):
     st.write("Bạn chắc chắn muốn xóa toàn bộ cuộc trò chuyện này?")
     
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("❌ Hủy", use_container_width=True):
-            st.rerun() # Lệnh này giúp đóng Dialog ngay lập tức
+        if st.button(" Hủy", use_container_width=True):
+            st.rerun()
             
     with col2:
-        if st.button("✔️ Xóa", use_container_width=True, type="primary"):
+        if st.button(" Xóa", use_container_width=True, type="primary"):
             if curr_id in st.session_state.all_sessions:
                 path = os.path.join("vector_store", curr_id)
                 if os.path.exists(path):
@@ -45,20 +41,20 @@ def confirm_delete_chat_dialog(curr_id):
                 )[0]
 
             save_sessions_to_disk(st.session_state.all_sessions)
-            st.rerun() # Thực thi xong, tự động đóng Dialog và làm mới màn hình
+            st.rerun() 
 
 
-@st.dialog("🧹 Xác nhận Xóa File")
+@st.dialog(" Xác nhận Xóa File")
 def confirm_delete_file_dialog(curr_id):
     st.write("Hành động này sẽ xóa toàn bộ tài liệu đã tải lên trong phiên này. Bạn có chắc chắn?")
     
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("❌ Hủy", use_container_width=True):
+        if st.button(" Hủy", use_container_width=True):
             st.rerun()
             
     with col2:
-        if st.button("✔️ Xóa File", use_container_width=True, type="primary"):
+        if st.button(" Xóa File", use_container_width=True, type="primary"):
             sess = st.session_state.all_sessions[curr_id]
             if sess.get("file_name") or sess.get("uploaded_files"):
                 path = os.path.join("vector_store", curr_id)
@@ -73,12 +69,10 @@ def confirm_delete_file_dialog(curr_id):
                 })
                 save_sessions_to_disk(st.session_state.all_sessions)
                 
-            st.rerun() # Tự động đóng popup sau khi xóa xong
+            st.rerun() 
 
 
-# ==========================================
 # GIAO DIỆN CHÍNH CỦA SIDEBAR
-# ==========================================
 
 def render_sidebar():
     """Render sidebar với quản lý phiên, cài đặt hệ thống và lọc metadata."""
@@ -87,10 +81,10 @@ def render_sidebar():
 
         curr_id = st.session_state.current_session_id
 
-        # ── 1. KHỐI CHỨC NĂNG HỆ THỐNG ────────────────────────────
+        # ──  KHỐI CHỨC NĂNG HỆ THỐNG 
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("➕ Chat mới", use_container_width=True):
+            if st.button(" Chat mới", use_container_width=True):
                 new_id = str(uuid.uuid4())
                 st.session_state.all_sessions[new_id] = {
                     "title"         : "Cuộc trò chuyện mới",
@@ -106,10 +100,10 @@ def render_sidebar():
 
         with col2:
             # Chỉ là một nút bấm bình thường. Khi bấm, gọi hàm mở Dialog
-            if st.button("🗑️ Xóa Chat", use_container_width=True, type="secondary"):
+            if st.button(" Xóa Chat", use_container_width=True, type="secondary"):
                 confirm_delete_chat_dialog(curr_id)
 
-        if st.button("🧹 Xóa File (Clear Vector)", use_container_width=True, help="Chỉ xóa tài liệu của phiên này, giữ lại tin nhắn"):
+        if st.button(" Xóa File ", use_container_width=True, help="Chỉ xóa tài liệu của phiên này, giữ lại tin nhắn"):
             sess = st.session_state.all_sessions[curr_id]
             if sess.get("file_name") or sess.get("uploaded_files"):
                 confirm_delete_file_dialog(curr_id)
@@ -123,7 +117,7 @@ def render_sidebar():
         for s_id, s_data in reversed(list(st.session_state.all_sessions.items())):
             is_active = s_id == st.session_state.current_session_id
             if st.button(
-                f"💬 {s_data['title']}",
+                f" {s_data['title']}",
                 key=f"sb_{s_id}",
                 disabled=is_active,
                 use_container_width=True,
@@ -134,7 +128,7 @@ def render_sidebar():
         st.divider()
 
         # ── 3. CÀI ĐẶT HỆ THỐNG ───────────────────────────────────
-        with st.expander("⚙️ Cài đặt hệ thống"):
+        with st.expander(" Cài đặt hệ thống"):
             st.info("Vector Store: **FAISS**")
             chunk_size    = st.slider("Chunk Size",    500,  3000, 3000, 100)
             chunk_overlap = st.slider("Chunk Overlap",  100,   500,  500,  50)
@@ -175,7 +169,7 @@ def render_sidebar():
         filter_dict = {}
 
         if uploaded_files:
-            with st.expander("🔍 Lọc theo Metadata", expanded=False):
+            with st.expander(" Lọc theo Metadata", expanded=False):
                 st.caption("Chỉ tìm kiếm trong tài liệu được chọn")
 
                 file_names = ["Tất cả"] + [f["name"] for f in uploaded_files]
@@ -191,7 +185,7 @@ def render_sidebar():
                         filter_dict["doc_category"] = selected_cat
 
                 if filter_dict:
-                    st.success(f"🔎 Đang lọc: {filter_dict}")
+                    st.success(f" Đang lọc: {filter_dict}")
                 else:
                     st.info("Đang tìm trong toàn bộ tài liệu")
 

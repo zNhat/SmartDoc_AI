@@ -3,7 +3,7 @@ import os
 
 from langchain_community.document_loaders import PDFPlumberLoader
 from langchain.schema import Document
-import docx2txt   # ✅ thay thế python-docx
+import docx2txt   
 
 from src.document.splitter import split_documents
 
@@ -22,7 +22,7 @@ def process_document(file_path: str, chunk_size: int, chunk_overlap: int):
         #  MERGE Nối trang KHÔNG dùng \n\n
         full_text = ""
         for i, page in enumerate(pages):
-            # Xóa các dấu xuống dòng kép thừa thãi trong mỗi trang (nếu có)
+            # Xóa các dấu xuống dòng kép thừa thãi trong mỗi trang
             clean_content = page.page_content.replace("\n\n", " ") 
             
             # Gắn số trang vào giữa câu như một thẻ [Trang X]

@@ -162,13 +162,13 @@ def render_chat_history(messages_list):
             if role != "assistant":
                 continue
 
-            # ==========================================
-            # 2. VẼ LẠI KHỐI ĐÁNH GIÁ (ADVANCED RAG)
-            # ==========================================
+            # ============================
+            # KHỐI ĐÁNH GIÁ (ADVANCED RAG)
+            # =============================
             advanced_rag = message.get("advanced_rag")
             if advanced_rag:
                 st.divider()
-                st.markdown("### 🧠 Advanced RAG Information")
+                st.markdown("###  Advanced RAG Information")
 
                 col1, col2 = st.columns([1, 3])
 
@@ -176,14 +176,14 @@ def render_chat_history(messages_list):
                     score = advanced_rag.get("confidence_score", 0)
                     st.metric("Confidence", f"{score}%")
                     st.progress(score / 100)
-                    st.caption(f"🔍 Phương pháp: `{advanced_rag.get('search_method', '')}`")
+                    st.caption(f" Phương pháp: `{advanced_rag.get('search_method', '')}`")
 
                 with col2:
                     st.markdown("**Câu hỏi đã được viết lại:**")
                     st.info(advanced_rag.get("rewritten_query", ""))
 
                 sub_questions = advanced_rag.get("sub_questions", [])
-                with st.expander("🔍 Multi-hop questions"):
+                with st.expander(" Multi-hop questions"):
                     if sub_questions:
                         for i, question in enumerate(sub_questions, start=1):
                             st.markdown(f"**Hop {i}:** {question}")
@@ -192,14 +192,14 @@ def render_chat_history(messages_list):
 
                 self_check = advanced_rag.get("self_check", {})
                 if self_check:
-                    with st.expander("✅ Self-RAG Verification"):
+                    with st.expander(" Self-RAG Verification"):
                         st.markdown(f"**Được hỗ trợ bởi tài liệu:** `{self_check.get('is_supported', True)}`")
                         st.markdown(f"**Lý do:** {self_check.get('reason', 'Không có')}")
                         st.markdown(f"**Thông tin còn thiếu:** {self_check.get('missing_info', 'Không có')}")
 
-            # ==========================================
-            # 3. VẼ LẠI NGUỒN THAM KHẢO (1 NÚT ĐÓNG/MỞ DUY NHẤT)
-            # ==========================================
+            # ======================
+            # 3.  NGUỒN THAM KHẢO 
+            # ======================
             if should_hide_sources(content):
                 continue
 
@@ -208,11 +208,10 @@ def render_chat_history(messages_list):
             if not sources:
                 continue
             
-            # GỌI EXPANDER Ở ĐÂY ĐỂ BỌC TOÀN BỘ CÁC ĐOẠN LẠI
-            with st.expander("📑 Xem toàn bộ nguồn tham khảo"):
+            with st.expander(" Xem toàn bộ nguồn tham khảo"):
                 for src in sources:
                     render_source_block(src)
                     
-                    # Thêm đường kẻ mờ phân tách giữa các đoạn (trừ đoạn cuối cùng)
+                    # Thêm đường kẻ mờ phân tách giữa các đoạn 
                     if src != sources[-1]:
                         st.divider()

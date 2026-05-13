@@ -122,7 +122,7 @@ def get_raw_page_for_chunk(metadata: dict):
     return page
 
 
-# ====================== CÂU 9: RE-RANK RETRIEVER ADAPTER ======================
+# ====================== RE-RANK RETRIEVER ADAPTER ======================
 
 @st.cache_resource
 def get_cached_cross_encoder_reranker():
@@ -195,7 +195,7 @@ class RerankRetrieverAdapter:
                 return get_cached_cross_encoder_reranker()
             except Exception as e:
                 st.warning(
-                    "⚠️ Không bật được CrossEncoderReranker, "
+                    " Không bật được CrossEncoderReranker, "
                     f"chuyển sang KeywordReranker. Lý do: {e}"
                 )
                 return KeywordReranker()
@@ -245,7 +245,7 @@ class RerankRetrieverAdapter:
         return self.invoke(query)
 
 
-# ====================== CÂU 5: HIGHLIGHT CONTEXT ======================
+# ======================  HIGHLIGHT CONTEXT ======================
 
 def render_highlighted_context(content: str):
     """
@@ -275,7 +275,7 @@ def render_highlighted_context(content: str):
 
 # ====================== KHỞI TẠO ======================
 
-st.set_page_config(page_title="SmartDoc AI", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="SmartDoc AI", page_icon="", layout="wide")
 
 if "all_sessions" not in st.session_state:
     saved_data = load_sessions_from_disk()
@@ -322,9 +322,9 @@ if curr_session.get("vector_store") is None and curr_session.get("file_name") is
 config_params = render_sidebar()
 
 
-# ====================== CÀI ĐẶT CÂU 9: RE-RANKING ======================
+# ======================  RE-RANKING ======================
 
-with st.sidebar.expander("🧠 Re-ranking"):
+with st.sidebar.expander(" Re-ranking"):
     use_cross_encoder = st.checkbox(
         "Bật Cross-Encoder Re-ranker",
         value=False,
@@ -338,7 +338,7 @@ with st.sidebar.expander("🧠 Re-ranking"):
         "Số chunk lấy trước re-rank",
         min_value=5,
         max_value=30,
-        value=20,
+        value=15,
         step=1,
     )
 
@@ -359,7 +359,7 @@ config_params["rerank_top_k"] = rerank_top_k
 
 # ====================== 2. QUẢN LÝ TÀI LIỆU ======================
 
-st.title("📄 SmartDoc AI")
+st.title(" SmartDoc AI")
 
 has_doc = bool(curr_session.get("uploaded_files") or curr_session.get("file_name"))
 
@@ -384,7 +384,7 @@ with st.expander("📁 Quản lý Tài liệu", expanded=not has_doc):
         new_files = [f for f in uploaded_files if f.name not in existing_names]
 
         if new_files:
-            with st.spinner(f"⏳ Đang xử lý {len(new_files)} tài liệu mới..."):
+            with st.spinner(f" Đang xử lý {len(new_files)} tài liệu mới..."):
                 all_new_docs = []
                 processed_meta = []
                 upload_date = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -426,7 +426,7 @@ with st.expander("📁 Quản lý Tài liệu", expanded=not has_doc):
                         )
 
                     except Exception as e:
-                        st.error(f"❌ Lỗi xử lý '{uf.name}': {e}")
+                        st.error(f" Lỗi xử lý '{uf.name}': {e}")
 
                     finally:
                         if tmp_path and os.path.exists(tmp_path):
@@ -456,7 +456,7 @@ with st.expander("📁 Quản lý Tài liệu", expanded=not has_doc):
                     save_sessions_to_disk(st.session_state.all_sessions)
 
                     names_str = ", ".join(m["name"] for m in processed_meta)
-                    st.success(f"✅ Đã xử lý {len(processed_meta)} file: {names_str}")
+                    st.success(f" Đã xử lý {len(processed_meta)} file: {names_str}")
                     st.rerun()
 
     uf_list = curr_session.get("uploaded_files", [])
@@ -613,5 +613,5 @@ if prompt_text := st.chat_input("Nhập câu hỏi..."):
                     st.rerun()
 
                 except Exception as e:
-                    st.error("❌ Lỗi AI.")
+                    st.error(" Lỗi AI.")
                     st.exception(e)
