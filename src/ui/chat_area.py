@@ -122,9 +122,7 @@ def render_source_block(src):
     rank_after = meta.get("rank_after", None)
     reranker_name = meta.get("reranker", "")
 
-    st.markdown(
-        f"### Đoạn {index} — 📄 `{source_name}` · Trang `{page}`"
-    )
+    st.markdown(f"### Đoạn {index} — 📄 `{source_name}` · Trang `{page}`")
 
     info_parts = []
 
@@ -144,7 +142,9 @@ def render_source_block(src):
             info_parts.append(f"⭐ Rerank score: `{rerank_score}`")
 
     if rank_before and rank_after:
-        info_parts.append(f"↕️ Rank trước: `{rank_before}` → sau re-rank: `{rank_after}`")
+        info_parts.append(
+            f"↕️ Rank trước: `{rank_before}` → sau re-rank: `{rank_after}`"
+        )
 
     if info_parts:
         st.caption(" · ".join(info_parts))

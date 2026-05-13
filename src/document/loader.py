@@ -3,11 +3,12 @@ import os
 
 from langchain_community.document_loaders import PDFPlumberLoader
 from langchain.schema import Document
-import docx2txt   # ✅ thay thế python-docx
+import docx2txt  # ✅ thay thế python-docx
 
 from src.document.splitter import split_documents
 
 logger = logging.getLogger(__name__)
+
 
 def process_document(file_path: str, chunk_size: int, chunk_overlap: int):
     """Đọc file PDF hoặc DOCX và trả về danh sách chunks"""
