@@ -43,14 +43,19 @@ def should_hide_sources(answer: str) -> bool:
 
 def infer_page_from_content(content: str):
     """
-    Fallback: nếu metadata không có page, thử lấy số trang ở cuối text PDF.
-    Ví dụ cuối chunk có dòng '24' thì dùng 24.
+    Trích xuất số trang từ thẻ [Sang Trang X] mà loader.py đã nhúng vào.
+    Nếu không có thẻ, dùng fallback tìm số ở cuối đoạn.
     """
     if not content:
         return None
 
-    lines = [line.strip() for line in str(content).splitlines() if line.strip()]
+    content_str = str(content)
 
+    matches = re.findall(r"\[Sang\s+Trang\s+(\d+)\]", content_str, re.IGNORECASE)
+    if matches:
+        return matches[0]
+
+    lines = [line.strip() for line in content_str.splitlines() if line.strip()]
     for line in reversed(lines[-5:]):
         if re.fullmatch(r"\d{1,4}", line):
             return line
@@ -178,6 +183,7 @@ class RerankRetrieverAdapter:
                     ),
                     page=page_value if page_value is not None else 0,
                     initial_score=1.0 - i * 0.05,
+                    chunk_index=metadata.get("chunk_index", 0) # <--- THÊM DÒNG NÀY
                 )
             )
 
@@ -399,7 +405,7 @@ with st.expander("📁 Quản lý Tài liệu", expanded=not has_doc):
                             config_params["chunk_overlap"],
                         )
 
-                        for doc in documents:
+                        for idx, doc in enumerate(documents):
                             if not hasattr(doc, "metadata") or doc.metadata is None:
                                 doc.metadata = {}
 
@@ -407,6 +413,7 @@ with st.expander("📁 Quản lý Tài liệu", expanded=not has_doc):
                             doc.metadata["file_type"] = suffix.replace(".", "").lower()
                             doc.metadata["upload_date"] = upload_date
                             doc.metadata["doc_category"] = doc_category
+                            doc.metadata["chunk_index"] = idx 
 
                         all_new_docs.extend(documents)
                         processed_meta.append(

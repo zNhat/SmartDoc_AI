@@ -24,6 +24,7 @@ Bạn là hệ thống phân tích câu hỏi cho Advanced RAG.
 
 Nhiệm vụ:
 - Tách câu hỏi thành tối đa 3 câu hỏi con cần truy xuất tài liệu.
+- Nếu câu hỏi yêu cầu "liệt kê" hoặc hỏi về "các danh sách/tùy chọn", BẮT BUỘC phải sinh ra một câu hỏi con yêu cầu "tìm chi tiết của từng mục".
 - Nếu câu hỏi đơn giản, chỉ trả về 1 câu hỏi.
 - Không giải thích.
 - Mỗi dòng là một câu hỏi con.
@@ -49,17 +50,17 @@ def build_answer_prompt(
     context: str
 ) -> str:
     return f"""
-Bạn là SmartDoc AI, một hệ thống hỏi đáp tài liệu theo kiến trúc RAG.
+Bạn là SmartDoc AI, một công cụ trích xuất dữ liệu tài liệu chính xác và chi tiết tuyệt đối.
 
-QUY TẮC BẮT BUỘC:
-1. Chỉ trả lời dựa trên phần "Ngữ cảnh đọc từ tài liệu".
-2. Nếu tài liệu không có thông tin, bắt buộc trả lời: "Không tìm thấy thông tin này trong tài liệu."
-3. Nếu câu hỏi không liên quan trực tiếp đến ngữ cảnh đọc từ tài liệu, bắt buộc trả lời: "Không tìm thấy thông tin này trong tài liệu."
-4. Không được bịa thêm thông tin ngoài tài liệu.
-5. Không được tự dùng kiến thức bên ngoài.
-6. Câu trả lời phải bắt đầu bằng câu: "Nội dung dưới đây được đọc từ tài liệu:"
-7. Trả lời bằng tiếng Việt, rõ ràng, có thể dùng gạch đầu dòng nếu cần.
-8. Nếu câu hỏi là câu hỏi nối tiếp, hãy dùng lịch sử hội thoại để hiểu ý người dùng.
+QUY TẮC BẮT BUỘC (TUYỆT ĐỐI TUÂN THỦ):
+1. TRÍCH XUẤT VÉT CẠN CHI TIẾT: ... (giữ nguyên của bạn)
+2. KHÔNG TÓM TẮT: ... (giữ nguyên của bạn)
+3. CHUẨN XÁC NGUỒN: ... (giữ nguyên)
+4. NGOẠI LỆ: ... (giữ nguyên)
+5. ĐỊNH DẠNG: Câu trả lời phải luôn bắt đầu bằng câu: "Nội dung dưới đây được đọc từ tài liệu:\n"
+6. NGÔN NGỮ: Bắt buộc trả lời 100% bằng tiếng Việt.
+7. XUỐNG DÒNG RÕ RÀNG: Giữa các đoạn văn, tiêu đề và các gạch đầu dòng BẮT BUỘC phải sử dụng dấu xuống dòng kép (khoảng trắng) để tách biệt. Tuyệt đối không viết dính chùm thành một khối chữ khổng lồ.
+8. TRÌNH BÀY LIST: Mỗi mục con phải nằm trên một dòng riêng biệt, bắt đầu bằng dấu "- " hoặc "* ".
 
 Lịch sử hội thoại:
 {history_context}
@@ -71,9 +72,11 @@ Câu hỏi độc lập đã được viết lại:
 {rewritten_question}
 
 Ngữ cảnh đọc từ tài liệu:
+---
 {context}
+---
 
-Câu trả lời:
+Câu trả lời nguyên văn và chi tiết đầy đủ mục con:
 """.strip()
 
 
@@ -88,9 +91,10 @@ Bạn là bộ kiểm tra Self-RAG cho hệ thống hỏi đáp tài liệu.
 
 Nhiệm vụ:
 - Kiểm tra câu trả lời có được hỗ trợ bởi tài liệu hay không.
+- Kiểm tra xem câu trả lời có lùi sót các gạch đầu dòng chi tiết trong ngữ cảnh hay không.
 - Không đánh giá theo kiến thức bên ngoài.
 - Chấm confidence_score từ 0 đến 100.
-- Nếu câu trả lời không đủ căn cứ, hãy nêu lý do ngắn gọn.
+- Nếu câu trả lời không đủ căn cứ hoặc thiếu sót mục con, hãy nêu lý do ngắn gọn.
 
 Chỉ trả về JSON hợp lệ, không markdown, không giải thích ngoài JSON.
 
@@ -98,7 +102,7 @@ Schema:
 {{
   "is_supported": true,
   "confidence_score": 85,
-  "reason": "Câu trả lời được hỗ trợ bởi các đoạn tài liệu liên quan.",
+  "reason": "Câu trả lời được hỗ trợ bởi các đoạn tài liệu liên quan và trích xuất đầy đủ mục con.",
   "missing_info": "Không có"
 }}
 

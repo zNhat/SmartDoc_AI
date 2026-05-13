@@ -30,6 +30,7 @@ class Chunk:
     rerank_score: float = 0.0     # điểm sau cross-encoder
     rank_before: int = 0
     rank_after: int = 0
+    chunk_index: int = 0  # <--- THÊM DÒNG NÀY ĐỂ NHỚ VỊ TRÍ GỐC
 
 
 @dataclass
@@ -211,32 +212,20 @@ class RAGRerankerPipeline:
         return result
 
     def format_context(self, result: RerankedResult) -> str:
-        """Định dạng các chunk thành context string để đưa vào LLM prompt.
-        ĐÃ NÂNG CẤP: Gộp các đoạn nằm trên cùng 1 trang lại để AI không bị đứt mạch đọc."""
-        from collections import defaultdict
+        """Định dạng context string. ĐÃ NÂNG CẤP: Khôi phục thứ tự gốc."""
         
-        # Nhóm các đoạn lại theo (Tên file, Số trang)
-        grouped_chunks = defaultdict(list)
-        for chunk in result.top_chunks:
-            key = (chunk.source, chunk.page)
-            grouped_chunks[key].append(chunk)
-
+        # Sắp xếp các đoạn văn TRỞ LẠI THỨ TỰ GỐC CỦA CUỐN SÁCH
+        ordered_chunks = sorted(result.top_chunks, key=lambda c: c.chunk_index)
+        
         parts = []
-        # Duyệt qua từng trang và ghép nội dung lại
-        for (source, page), chunks_in_page in grouped_chunks.items():
-            # Nối text của các đoạn trong cùng 1 trang lại với nhau
-            combined_text = "\n...[nội dung liền kề]...\n".join(c.text for c in chunks_in_page)
-            
-            # Lấy điểm trung bình để tham khảo (hoặc lấy max)
-            avg_score = sum(c.rerank_score for c in chunks_in_page) / len(chunks_in_page)
-            
+        for i, chunk in enumerate(ordered_chunks, 1):
+            source_display = chunk.source or "Tài liệu"
             parts.append(
-                f"[Nguồn: {source} | Trang: {page}]\n"
-                f"{combined_text}\n"
-                f"(Độ liên quan trung bình của trang: {avg_score:.4f})"
+                f"[Nguồn {i} | Trang: {chunk.page}]\n"
+                f"{chunk.text}\n"
             )
             
-        return "\n\n------------------------\n\n".join(parts)
+        return "\n\n...[nối tiếp]...\n\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
