@@ -21,8 +21,8 @@ from src.retriever.faiss_store import (
 from src.retriever.hybrid import get_hybrid_retriever, get_retrieval_comparison
 from src.llm.generator import generate_conversational_answer
 
-
 # ====================== HELPER: SOURCE / PAGE ======================
+
 
 def should_hide_sources(answer: str) -> bool:
     """
@@ -124,6 +124,7 @@ def get_raw_page_for_chunk(metadata: dict):
 
 # ====================== RE-RANK RETRIEVER ADAPTER ======================
 
+
 @st.cache_resource
 def get_cached_cross_encoder_reranker():
     """
@@ -183,7 +184,7 @@ class RerankRetrieverAdapter:
                     ),
                     page=page_value if page_value is not None else 0,
                     initial_score=1.0 - i * 0.05,
-                    chunk_index=metadata.get("chunk_index", 0) # <--- THÊM DÒNG NÀY
+                    chunk_index=metadata.get("chunk_index", 0),  # <--- THÊM DÒNG NÀY
                 )
             )
 
@@ -247,6 +248,7 @@ class RerankRetrieverAdapter:
 
 # ======================  HIGHLIGHT CONTEXT ======================
 
+
 def render_highlighted_context(content: str):
     """
     Highlight context gốc được dùng làm nguồn.
@@ -309,7 +311,10 @@ curr_session = st.session_state.all_sessions[curr_id]
 
 # ====================== NẠP VECTOR STORE ======================
 
-if curr_session.get("vector_store") is None and curr_session.get("file_name") is not None:
+if (
+    curr_session.get("vector_store") is None
+    and curr_session.get("file_name") is not None
+):
     loaded_vs = load_vector_store(curr_id)
 
     if loaded_vs:
@@ -383,81 +388,96 @@ with st.expander("📁 Quản lý Tài liệu", expanded=not has_doc):
         existing_names = {f["name"] for f in curr_session.get("uploaded_files", [])}
         new_files = [f for f in uploaded_files if f.name not in existing_names]
 
-        if new_files:
-            with st.spinner(f" Đang xử lý {len(new_files)} tài liệu mới..."):
-                all_new_docs = []
-                processed_meta = []
-                upload_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if new_files:
+        with st.spinner("⏳ Đang xử lý lại toàn bộ tài liệu..."):
+            upload_date = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-                for uf in new_files:
-                    tmp_path = None
+            upload_dir = os.path.join("uploaded_files", curr_id)
+            os.makedirs(upload_dir, exist_ok=True)
 
-                    try:
-                        suffix = os.path.splitext(uf.name)[1]
+            # 1. Lưu file mới vào thư mục riêng của session
+            for uf in new_files:
+                file_path = os.path.join(upload_dir, uf.name)
 
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-                            tmp_file.write(uf.getvalue())
-                            tmp_path = tmp_file.name
+                with open(file_path, "wb") as f:
+                    f.write(uf.getvalue())
 
-                        documents, chunk_count = process_document(
-                            tmp_path,
-                            config_params["chunk_size"],
-                            config_params["chunk_overlap"],
-                        )
+            # 2. Cập nhật metadata file mới
+            old_meta = curr_session.get("uploaded_files", [])
 
-                        for idx, doc in enumerate(documents):
-                            if not hasattr(doc, "metadata") or doc.metadata is None:
-                                doc.metadata = {}
+            new_meta = []
+            for uf in new_files:
+                suffix = os.path.splitext(uf.name)[1].replace(".", "").lower()
 
-                            doc.metadata["file_name"] = uf.name
-                            doc.metadata["file_type"] = suffix.replace(".", "").lower()
-                            doc.metadata["upload_date"] = upload_date
-                            doc.metadata["doc_category"] = doc_category
-                            doc.metadata["chunk_index"] = idx 
+                new_meta.append(
+                    {
+                        "name": uf.name,
+                        "upload_date": upload_date,
+                        "doc_category": doc_category,
+                        "file_type": suffix,
+                        "chunk_count": 0,
+                    }
+                )
 
-                        all_new_docs.extend(documents)
-                        processed_meta.append(
-                            {
-                                "name": uf.name,
-                                "upload_date": upload_date,
-                                "doc_category": doc_category,
-                                "chunk_count": chunk_count,
-                            }
-                        )
+            all_file_meta = old_meta + new_meta
 
-                    except Exception as e:
-                        st.error(f" Lỗi xử lý '{uf.name}': {e}")
+            # 3. Re-chunk lại toàn bộ file trong session
+            rebuilt_docs = []
+            rebuilt_meta = []
 
-                    finally:
-                        if tmp_path and os.path.exists(tmp_path):
-                            os.remove(tmp_path)
+            for meta in all_file_meta:
+                file_path = os.path.join(upload_dir, meta["name"])
 
-                if all_new_docs:
-                    existing_vs = curr_session.get("vector_store")
+                if not os.path.exists(file_path):
+                    continue
 
-                    if existing_vs is None:
-                        vector_store = create_vector_store(all_new_docs)
-                    else:
-                        vector_store = update_vector_store(existing_vs, all_new_docs)
+                try:
+                    documents, chunk_count = process_document(
+                        file_path,
+                        config_params["chunk_size"],
+                        config_params["chunk_overlap"],
+                    )
 
-                    save_vector_store(vector_store, curr_id)
+                    for doc in documents:
+                        if not hasattr(doc, "metadata") or doc.metadata is None:
+                            doc.metadata = {}
 
-                    st.session_state.all_sessions[curr_id]["vector_store"] = vector_store
-                    st.session_state.all_sessions[curr_id]["file_name"] = new_files[-1].name
+                        doc.metadata["file_name"] = meta["name"]
+                        doc.metadata["file_type"] = meta.get("file_type", "")
+                        doc.metadata["upload_date"] = meta.get("upload_date", "")
+                        doc.metadata["doc_category"] = meta.get("doc_category", "")
 
-                    uf_list = st.session_state.all_sessions[curr_id].get("uploaded_files", [])
-                    uf_list.extend(processed_meta)
-                    st.session_state.all_sessions[curr_id]["uploaded_files"] = uf_list
+                    rebuilt_docs.extend(documents)
 
-                    existing_docs = st.session_state.all_sessions[curr_id].get("documents", [])
-                    existing_docs.extend(all_new_docs)
-                    st.session_state.all_sessions[curr_id]["documents"] = existing_docs
+                    meta["chunk_count"] = chunk_count
+                    rebuilt_meta.append(meta)
 
-                    save_sessions_to_disk(st.session_state.all_sessions)
+                except Exception as e:
+                    st.error(f"❌ Lỗi xử lý '{meta['name']}': {e}")
 
-                    names_str = ", ".join(m["name"] for m in processed_meta)
-                    st.success(f" Đã xử lý {len(processed_meta)} file: {names_str}")
-                    st.rerun()
+            # 4. Tạo mới vector store hoàn toàn, không update vector cũ
+            if rebuilt_docs:
+                vector_store = create_vector_store(rebuilt_docs)
+                save_vector_store(vector_store, curr_id)
+
+                st.session_state.all_sessions[curr_id]["vector_store"] = vector_store
+                st.session_state.all_sessions[curr_id]["file_name"] = rebuilt_meta[-1][
+                    "name"
+                ]
+                st.session_state.all_sessions[curr_id]["uploaded_files"] = rebuilt_meta
+                st.session_state.all_sessions[curr_id]["documents"] = rebuilt_docs
+
+                save_sessions_to_disk(st.session_state.all_sessions)
+
+                total_chunks = sum(m.get("chunk_count", 0) for m in rebuilt_meta)
+                names_str = ", ".join(m["name"] for m in rebuilt_meta)
+
+                st.success(
+                    f"✅ Đã re-chunk toàn bộ {len(rebuilt_meta)} file: "
+                    f"{names_str} | Tổng: {total_chunks} chunks"
+                )
+
+                st.rerun()
 
     uf_list = curr_session.get("uploaded_files", [])
 
@@ -506,7 +526,9 @@ if prompt_text := st.chat_input("Nhập câu hỏi..."):
             st.markdown(prompt_text)
 
         with st.chat_message("assistant"):
-            with st.spinner("Đang tra cứu, re-rank, suy luận và tự kiểm tra câu trả lời..."):
+            with st.spinner(
+                "Đang tra cứu, re-rank, suy luận và tự kiểm tra câu trả lời..."
+            ):
                 try:
                     vector_store = curr_session["vector_store"]
                     documents = curr_session.get("documents", [])
@@ -587,7 +609,7 @@ if prompt_text := st.chat_input("Nhập câu hỏi..."):
                             src["page"] = get_page_display_from_source(src)
 
                     st.markdown(answer)
-                    
+
                     source_texts = [src.get("content", "") for src in sources]
 
                     st.session_state.all_sessions[curr_id]["messages"].append(
