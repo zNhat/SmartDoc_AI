@@ -1,5 +1,5 @@
 """
-Câu hỏi 9 - Re-ranking với Cross-Encoder
+Re-ranking với Cross-Encoder
 =========================================
 Module này thêm bước đánh giá và sắp xếp lại thứ tự các chunk
 sau khi retrieval để tối ưu hóa độ liên quan.
@@ -30,6 +30,7 @@ class Chunk:
     rerank_score: float = 0.0     # điểm sau cross-encoder
     rank_before: int = 0
     rank_after: int = 0
+    chunk_index: int = 0 
 
 
 @dataclass
@@ -183,8 +184,8 @@ class RAGRerankerPipeline:
     def __init__(
         self,
         reranker: Optional[CrossEncoderReranker | KeywordReranker] = None,
-        retrieve_top_n: int = 20,   # số chunk lấy từ vector DB
-        rerank_top_k: int = 5,      # số chunk giữ lại sau re-rank
+        retrieve_top_n: int = 20,  
+        rerank_top_k: int = 5,      
     ):
         self.reranker = reranker or KeywordReranker()
         self.retrieve_top_n = retrieve_top_n
@@ -211,15 +212,19 @@ class RAGRerankerPipeline:
         return result
 
     def format_context(self, result: RerankedResult) -> str:
-        """Định dạng các chunk thành context string để đưa vào LLM prompt."""
+        """Định dạng context string. ĐÃ NÂNG CẤP: Khôi phục thứ tự gốc."""
+        
+        ordered_chunks = sorted(result.top_chunks, key=lambda c: c.chunk_index)
+        
         parts = []
-        for i, chunk in enumerate(result.top_chunks, 1):
+        for i, chunk in enumerate(ordered_chunks, 1):
+            source_display = chunk.source or "Tài liệu"
             parts.append(
-                f"[Đọc từ tài liệu - Nguồn: {chunk.source}, Trang: {chunk.page}]\n"
+                f"[Nguồn {i} | Trang: {chunk.page}]\n"
                 f"{chunk.text}\n"
-                f"(Điểm liên quan: {chunk.rerank_score:.4f})"
             )
-        return "\n\n---\n\n".join(parts)
+            
+        return "\n\n...[nối tiếp]...\n\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +268,6 @@ def demo():
     for i, c in enumerate(mock_chunks, 1):
         print(f"  {i}. [{c.initial_score:.2f}] {c.text[:70]}...")
 
-    # Dùng KeywordReranker (không cần model để chạy demo)
     reranker = KeywordReranker()
     result = reranker.rerank(query, mock_chunks, top_k=3)
 
@@ -278,7 +282,6 @@ def demo():
 
     print("\nContext đưa vào LLM:")
     pipeline = RAGRerankerPipeline(reranker=reranker, rerank_top_k=3)
-    # Giả lập đã có chunks, gọi thẳng format_context
     print(pipeline.format_context(result))
 
 

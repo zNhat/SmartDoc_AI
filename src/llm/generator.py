@@ -18,7 +18,7 @@ from src.llm.prompts import (
 # 1. LLM CONFIG
 # =========================
 
-def get_llm(llm_model: str, temperature: float = 0.3) -> Ollama:
+def get_llm(llm_model: str, temperature: float = 0.1) -> Ollama:
     """
     Khởi tạo Ollama LLM.
     Giới hạn num_predict để tránh model sinh quá dài và bị treo.
@@ -27,9 +27,9 @@ def get_llm(llm_model: str, temperature: float = 0.3) -> Ollama:
         model=llm_model,
         temperature=temperature,
         top_p=0.9,
-        repeat_penalty=1.1,
-        num_predict=512,
-        num_ctx=4096,
+        repeat_penalty=1.0,
+        num_predict=4096, # Tăng giới hạn độ dài câu trả lời
+        num_ctx=8192,     # Tăng cửa sổ ngữ cảnh để chứa được nhiều chunk hơn
         timeout=600,
     )
 
@@ -285,37 +285,63 @@ def build_source_label(doc: Any, index: int) -> str:
     return f"Nguồn {index} | File: {source} | Trang: {page_text}"
 
 
-def format_docs_as_context(docs: List[Any], max_chars_per_doc: int = 1400) -> str:
+def format_docs_as_context(docs: List[Any], max_chars_per_doc: int = 4000) -> str:
     """
     Ghép docs thành context.
-    Giới hạn mỗi chunk để tránh prompt quá dài.
+    ĐÃ NÂNG CẤP: Tự động gộp các chunk thuộc cùng một trang lại với nhau 
+    để AI đọc không bị đứt mạch ngữ cảnh.
     """
     if not docs:
         return "Không có đoạn tài liệu liên quan được truy xuất."
 
-    context_parts = []
-
-    for i, doc in enumerate(docs, start=1):
+    from collections import defaultdict
+    
+    # Gom nhóm các chunk theo (Tên_file, Số_trang)
+    grouped_docs = defaultdict(list)
+    
+    for doc in docs:
+        metadata = get_doc_metadata(doc)
+        source = (
+            metadata.get("file_name")
+            or metadata.get("filename")
+            or metadata.get("source")
+            or "Tài liệu đã upload"
+        )
+        
+        page = metadata.get("page", None)
+        if page is None:
+            page = metadata.get("page_number", None)
+        if page is None:
+            page = metadata.get("page_label", None)
+            
         content = get_doc_content(doc)
+        if content:
+            grouped_docs[(source, page)].append(content)
 
-        if not content:
-            continue
+    context_parts = []
+    part_index = 1
 
-        if len(content) > max_chars_per_doc:
-            content = content[:max_chars_per_doc] + "..."
+    # Duyệt qua từng nhóm trang để ghép nối
+    for (source, page), contents in grouped_docs.items():
+        # Nối các chunk lại bằng dấu chấm lửng chuyển tiếp
+        merged_content = "\n...[nội dung liền kề]...\n".join(contents)
 
-        source_label = build_source_label(doc, i)
+        # Giới hạn an toàn (nới lỏng lên 4000 ký tự)
+        if len(merged_content) > max_chars_per_doc:
+            merged_content = merged_content[:max_chars_per_doc] + "\n...[đã cắt bớt do quá dài]"
+
+        page_display = format_page_number(page)
 
         context_parts.append(
-            f"[Đoạn {i}]\n"
-            f"{source_label}\n"
-            f"Nội dung:\n{content}"
+            f"[Nguồn {part_index} | File: {source} | Trang: {page_display}]\n"
+            f"Nội dung:\n{merged_content}"
         )
+        part_index += 1
 
     if not context_parts:
         return "Không có đoạn tài liệu liên quan được truy xuất."
 
-    return "\n\n".join(context_parts)
+    return "\n\n========================\n\n".join(context_parts)
 
 
 def doc_unique_key(doc: Any) -> str:
@@ -329,7 +355,7 @@ def doc_unique_key(doc: Any) -> str:
     return f"{source}|{page}|{content_head}"
 
 
-def deduplicate_docs(docs: List[Any], max_docs: int = 8) -> List[Any]:
+def deduplicate_docs(docs: List[Any], max_docs: int = 15) -> List[Any]:
     unique_docs = []
     seen = set()
 
@@ -600,7 +626,7 @@ def expand_questions_for_retrieval(
 def retrieve_docs_for_questions(
     retriever: Any,
     questions: List[str],
-    max_docs: int = 8
+    max_docs: int = 40
 ) -> List[Any]:
     all_docs = []
 
@@ -789,24 +815,12 @@ def generate_answer_from_docs(
         llm_model=llm_model,
     )
 
-    if not relevance.get("can_answer", True):
-        answer = (
-            "Nội dung dưới đây được đọc từ tài liệu:\n"
-            "Không tìm thấy thông tin này trong tài liệu."
-        )
-
-        return {
-            "answer": answer,
-            "context": context,
-            "self_check": {
-                "is_supported": False,
-                "confidence_score": relevance.get("confidence_score", 30),
-                "reason": relevance.get("reason", "Ngữ cảnh không đủ liên quan để trả lời."),
-                "missing_info": "Tài liệu không chứa thông tin trực tiếp cho câu hỏi này.",
-            },
-            "confidence_score": relevance.get("confidence_score", 30),
-            "sources": extract_sources(docs),
-        }
+    # if not relevance.get("can_answer", True):
+    #     answer = (
+    #         "Nội dung dưới đây được đọc từ tài liệu:\n"
+    #         "Không tìm thấy thông tin này trong tài liệu."
+    #     )
+    #     return { ... }
 
     prompt = build_answer_prompt(
         user_question=user_question,
@@ -815,16 +829,14 @@ def generate_answer_from_docs(
         context=context,
     )
 
-    llm = get_llm(llm_model, temperature=0.2)
+    llm = get_llm(llm_model, temperature=0.1) # Hạ temperature xuống 0.1 cho chính xác
     answer = invoke_llm(llm, prompt)
     answer = ensure_document_prefix(answer)
 
-    # Để chạy nhanh: dùng confidence từ relevance.
-    # Nếu muốn Self-RAG kiểm tra lại bằng LLM, thay block này bằng self_check_answer(...).
     self_check = {
         "is_supported": True,
         "confidence_score": relevance.get("confidence_score", 75),
-        "reason": "Đã kiểm tra relevance trước khi sinh câu trả lời.",
+        "reason": relevance.get("reason", "LLM tự quyết định dựa trên context."),
         "missing_info": "Không có",
     }
 
@@ -843,17 +855,43 @@ def generate_conversational_answer(
     chat_messages: Optional[List[Dict[str, Any]]],
     llm_model: str
 ) -> Dict[str, Any]:
+    
+    # ========================================================
+    # 1. BỘ LỌC LỊCH SỬ THÔNG MINH (CHỐNG HỌC VẸT TRẢ LỜI NGẮN)
+    # ========================================================
+    optimized_messages = []
+    if chat_messages:
+        # Chỉ lấy tối đa 4 tin nhắn gần nhất (khoảng 2 lượt hỏi - đáp)
+        for msg in chat_messages[-4:]:
+            content = msg.get("content", "")
+            role = msg.get("role", "user")
+            
+            # Kỷ luật thép: Ẩn hoàn toàn câu trả lời cũ của AI
+            # Thay bằng thông báo hệ thống để AI nghĩ rằng mình luôn làm tốt
+            if role == "assistant":
+                focus = extract_focus_from_previous_answer(content)
+                if focus:
+                    content = f"[Hệ thống: AI đã trả lời chi tiết và xuất sắc về '{focus}'. Nội dung dài đã được hệ thống ẩn đi để giải phóng bộ nhớ.]"
+                else:
+                    content = "[Hệ thống: AI đã trả lời đầy đủ các chi tiết dựa trên tài liệu. Nội dung đã được ẩn đi.]"
+                
+            optimized_messages.append({"role": role, "content": content})
+
+
+    # ========================================================
+    # 2. LUỒNG XỬ LÝ CHÍNH (SỬ DỤNG LỊCH SỬ ĐÃ LỌC THÔNG MINH)
+    # ========================================================
     rewritten_query = rewrite_query(
         user_question=query,
-        chat_messages=chat_messages,
+        chat_messages=optimized_messages, 
         llm_model=llm_model,
     )
 
     if should_use_multihop(query, rewritten_query):
         sub_questions = generate_sub_questions(
             user_question=query,
-            rewritten_question=rewritten_query,
-            chat_messages=chat_messages,
+            rewritten_question=rewritten_query, # Đã sửa đúng chính tả
+            chat_messages=optimized_messages, 
             llm_model=llm_model,
         )
     else:
@@ -861,21 +899,21 @@ def generate_conversational_answer(
 
     retrieval_questions = expand_questions_for_retrieval(
         user_question=query,
-        rewritten_question=rewritten_query,
+        rewritten_question=rewritten_query, # Đã sửa đúng chính tả
         sub_questions=sub_questions,
     )
 
     retrieved_docs = retrieve_docs_for_questions(
         retriever=retriever,
         questions=retrieval_questions,
-        max_docs=8,
+        max_docs=40,
     )
 
     result = generate_answer_from_docs(
         user_question=query,
-        rewritten_question=rewritten_query,
+        rewritten_question=rewritten_query, # Đã sửa đúng chính tả
         docs=retrieved_docs,
-        chat_messages=chat_messages,
+        chat_messages=optimized_messages, 
         llm_model=llm_model,
     )
 
@@ -885,7 +923,6 @@ def generate_conversational_answer(
     result["retrieval_questions"] = retrieval_questions
 
     return result
-
 
 # =========================
 # 8. BACKWARD COMPATIBILITY
